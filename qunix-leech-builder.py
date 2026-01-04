@@ -688,10 +688,8 @@ def create_quine_evolver_bitcode() -> bytes:
         # If reg4=1, jumps back to LOOP_START
         # Otherwise continues to HALT
         
-        0x41,
-# HALT (unreachable - safety)
+        0x41,                                    # HALT (unreachable - safety)
     ])
-    
     print(f"    {C.G}✓ Quine Evolver: {len(bytecode)} bytes (infinite loop){C.E}")
     return bytes(bytecode)
 
@@ -1143,7 +1141,7 @@ def measure_tensor(tensor: np.ndarray, shots: int = 1024) -> Dict[str, int]:
 
 
 def create_triangles(conn: sqlite3.Connection):
-    """Create triangles (W-state quadruples) from qubits"""
+    """Create triangles (W-state quadruples) from qubits - OPTIMIZED"""
     print(f"{C.C}Creating triangles (W-state quadruples)...{C.E}")
     c = conn.cursor()
     c.execute(f'SELECT qid FROM {T_PQB} WHERE qid >= 2 ORDER BY qid')
@@ -1151,14 +1149,22 @@ def create_triangles(conn: sqlite3.Connection):
     
     max_triangles = min(65536, len(qubits) // 3)
     
-    # Create W-state tensor
+    # Create W-state tensor ONCE
     w_tensor = create_w_tensor()
     w_tensor_compressed = zlib.compress(w_tensor.tobytes(), level=9)
+    
+    # Measure fidelity periodically (every 500 triangles) for running average
+    print(f"{C.C}  Calculating fidelity profile (sampling every 500 triangles)...{C.E}")
+    fidelity_cache = []
+    measure_interval = 500
     
     batch = []
     i = 0
     tid = 0
     prev_v3 = None
+    last_measured_fidelity = 0.0
+    
+    print(f"{C.C}  Creating {max_triangles:,} triangles...{C.E}")
     
     while i < len(qubits) and tid < max_triangles:
         if tid == 0:
@@ -1175,52 +1181,69 @@ def create_triangles(conn: sqlite3.Connection):
             v1, v2, v3 = qubits[i], qubits[i+1], qubits[i+2]
             i += 3
         
-        # Measure fidelity
-        counts = measure_tensor(w_tensor, shots=1024)
-        fidelity = sum(counts.get(outcome, 0) for outcome in ['1000', '0100', '0010', '0001']) / 1024.0
+        # Measure fidelity every 500 triangles for best running average
+        if tid % measure_interval == 0:
+            counts = measure_tensor(w_tensor, shots=1024)
+            last_measured_fidelity = sum(counts.get(outcome, 0) for outcome in ['1000', '0100', '0010', '0001']) / 1024.0
+            fidelity_cache.append(last_measured_fidelity)
+        
+        # Use most recent measurement
+        fidelity = last_measured_fidelity
         
         batch.append((tid, v0, v1, v2, v3, fidelity, w_tensor_compressed, time.time()))
         prev_v3 = v3
         tid += 1
         
-        if len(batch) >= 5000:
+        # Larger batches, fewer commits
+        if len(batch) >= 10000:
             c.executemany(f'INSERT INTO {T_TRI} VALUES (?,?,?,?,?,?,?,?)', batch)
             conn.commit()
             batch = []
             
             if tid % 10000 == 0:
                 progress = tid / max_triangles * 100
-                print(f"  Progress: {tid:,}/{max_triangles:,} ({progress:.1f}%)", end='\r')
+                avg_fid = sum(fidelity_cache) / len(fidelity_cache) if fidelity_cache else 0.0
+                print(f"  Progress: {tid:,}/{max_triangles:,} ({progress:.1f}%) | Avg Fidelity: {avg_fid:.4f}", end='\r')
     
     if batch:
         c.executemany(f'INSERT INTO {T_TRI} VALUES (?,?,?,?,?,?,?,?)', batch)
         conn.commit()
     
-    print(f"\n{C.G}✓ {tid:,} triangles created{C.E}\n")
+    avg_fidelity = sum(fidelity_cache) / len(fidelity_cache) if fidelity_cache else 0.0
+    print(f"\n{C.G}✓ {tid:,} triangles created (avg fidelity: {avg_fidelity:.4f} from {len(fidelity_cache)} measurements){C.E}\n")
     return tid
 
 
 def entangle_system(conn: sqlite3.Connection):
-    """Create entanglement chain across qubits"""
+    """Create entanglement chain across qubits - OPTIMIZED"""
     print(f"{C.M}Creating entanglement chain...{C.E}")
     c = conn.cursor()
     c.execute(f'SELECT qid FROM {T_PQB} ORDER BY qid LIMIT 1000')
     qubits = [r[0] for r in c.fetchall()]
     
     batch = []
-    for i in range(len(qubits) - 1):
+    total_links = len(qubits) - 1
+    
+    print(f"{C.C}  Creating {total_links:,} entanglement links...{C.E}")
+    
+    for i in range(total_links):
         batch.append((qubits[i], qubits[i+1], 'chain', 0.98, time.time()))
         
-        if len(batch) >= 1000:
+        # Much larger batches, fewer commits
+        if len(batch) >= 5000:
             c.executemany(f'INSERT INTO {T_ENT} VALUES (NULL,?,?,?,?,?)', batch)
             conn.commit()
             batch = []
+            
+            if (i+1) % 5000 == 0:
+                progress = (i + 1) / total_links * 100
+                print(f"  Progress: {i+1:,}/{total_links:,} ({progress:.1f}%)", end='\r')
     
     if batch:
         c.executemany(f'INSERT INTO {T_ENT} VALUES (NULL,?,?,?,?,?)', batch)
         conn.commit()
     
-    print(f"{C.G}✓ Entanglement chain created ({len(qubits)-1} links){C.E}\n")
+    print(f"\n{C.G}✓ Entanglement chain created ({total_links:,} links){C.E}\n")
 
 
 def bootstrap_kernel(conn: sqlite3.Connection):
@@ -1253,7 +1276,6 @@ def bootstrap_kernel(conn: sqlite3.Connection):
         (0, 0, "boot", ?, 0, ?, 0, 0, 0, 0, "H", NULL, ?)''',
         (sqrt2_inv, sqrt2_inv, time.time()))
     
-   
     c.execute(f'''INSERT INTO {T_PQB} VALUES 
         (1, 1, "boot", ?, 0, ?, 0, 0, 1, 1, "CNOT", NULL, ?)''',
         (sqrt2_inv, sqrt2_inv, time.time()))
@@ -1324,6 +1346,7 @@ def finalize_metadata(conn: sqlite3.Connection, num_points: int, num_triangles: 
         ('metaprograms_running', 'true', time.time()),
         ('architecture', 'leech24', time.time()),
         ('bootstrap_complete', 'true', time.time()),
+        ('kernel_state', 'BOOTED', time.time()),
     ]
     
     c.executemany('INSERT INTO meta VALUES (?,?,?)', metadata)
