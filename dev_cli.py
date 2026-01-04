@@ -13,6 +13,7 @@
 ║  • Interactive REPL with multi-line support                               ║
 ║  • Complete binary execution on lattice-mapped qubits                     ║
 ║  • Full access to opcodes, syscalls, and bitcode programs                 ║
+║  • Metaprogram monitoring and control                                     ║
 ║                                                                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
@@ -21,6 +22,7 @@ import sqlite3
 import json
 import time
 import sys
+import os
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -49,7 +51,21 @@ class C:
     M = '\033[35m'; O = '\033[38;5;208m'; BOLD = '\033[1m'
     GRAY = '\033[90m'
 
-DB_PATH = Path("qunix_leech.db")
+# ═══════════════════════════════════════════════════════════════════════════
+# DATABASE PATH CONFIGURATION - MATCHES BUILDER
+# ═══════════════════════════════════════════════════════════════════════════
+
+RENDER_DISK_PATH = os.environ.get('RENDER_DISK_PATH', '/data')
+DATA_DIR = Path(RENDER_DISK_PATH)
+
+# Fallback to current directory if /data not writable
+if not DATA_DIR.exists() or not os.access(str(DATA_DIR), os.W_OK):
+    print(f"{C.Y}⚠ {DATA_DIR} not accessible, using current directory{C.E}")
+    DATA_DIR = Path.cwd()
+
+DB_PATH = DATA_DIR / "qunix_leech.db"
+
+print(f"{C.C}Database location: {DB_PATH}{C.E}")
 
 # Table names from builder
 T_LAT="lat";T_PQB="pqb";T_TRI="tri";T_PRC="prc";T_THR="thr";T_MEM="mem"
@@ -98,10 +114,33 @@ OPCODES = {
     0x42: ('MOV', 2),
     0x43: ('ADD', 3),
     0x44: ('SUB', 3),
+    0x45: ('CMP', 2),
+    0x46: ('JMP', 1),
+    0x47: ('JNZ', 1),
+    0x48: ('JZ', 1),
+    0x49: ('CALL', 1),
+    0x4A: ('RET', 0),
     
     # Memory ops
     0x80: ('LOAD', 2),
     0x81: ('STORE', 2),
+    0x82: ('DBREAD', 2),
+    0x83: ('DBWRITE', 3),
+    0x84: ('DBQUERY', 2),
+    
+    # Metaprogramming ops
+    0xA0: ('SELF_READ', 0),
+    0xA1: ('SELF_MUTATE', 1),
+    0xA2: ('SELF_FORK', 0),
+    0xA3: ('VERIFY', 1),
+    0xA4: ('ROLLBACK', 1),
+    0xA5: ('CHECKPOINT', 0),
+    0xA6: ('PATCH_APPLY', 1),
+    0xA7: ('LOOP_START', 0),
+    0xA8: ('LOOP_END', 1),
+    0xA9: ('SYMBOLIC_STATE', 1),
+    0xAA: ('CTC_BACKPROP', 2),
+    0xAB: ('ENTANGLE_MUTATE', 2),
     
     # Syscalls
     0xE0: ('SYSCALL', 1),
@@ -220,29 +259,28 @@ def boot_quantum_kernel(conn: sqlite3.Connection):
     print(f"{C.C}Step 1: Creating W-state |W⟩ = (|100⟩ + |010⟩ + |001⟩)/√3{C.E}")
     
     if QISKIT_AVAILABLE:
-        # Create W-state using proper circuit
+        # Create W-state using basic gates
         qc = QuantumCircuit(3)
         
         # W-state preparation
-        theta = 2 * np.arccos(1/np.sqrt(3))
-        qc.ry(theta, 0)
-        qc.ch(0, 1)
-        qc.ccx(0, 1, 2)
+        qc.x(0)
+        qc.ry(np.arccos(np.sqrt(2/3)), 0)
         qc.cx(0, 1)
-        
+        qc.x(0)
+        qc.ccx(0, 1, 2)
+        qc.x(0)
+
         # Simulate
         sim = AerSimulator(method='statevector')
         qc.save_statevector()
         result = sim.run(qc, shots=1).result()
         statevector = result.get_statevector()
         
-        # Extract amplitudes (simplified - W-state is symmetric)
         coeff = 1.0 / np.sqrt(3)
         amplitudes = [(coeff, coeff), (coeff, coeff), (coeff, coeff)]
         
         print(f"  {C.GRAY}[Using Qiskit Aer simulation]{C.E}")
     else:
-        # Manual W-state coefficients
         coeff = 1.0 / np.sqrt(3)
         amplitudes = [(coeff, coeff), (coeff, coeff), (coeff, coeff)]
         print(f"  {C.GRAY}[Using classical simulation]{C.E}")
@@ -304,7 +342,6 @@ def boot_quantum_kernel(conn: sqlite3.Connection):
         result = sim.run(qc3, shots=1).result()
         sv = result.get_statevector()
         
-        # Bell state formed
         alpha_1 = beta_1 = 1.0 / np.sqrt(2)
     else:
         alpha_1 = beta_1 = 1.0 / np.sqrt(2)
@@ -351,21 +388,218 @@ def boot_quantum_kernel(conn: sqlite3.Connection):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# METAPROGRAM MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+
+def show_metaprogram_status(conn: sqlite3.Connection):
+    """Show status of all metaprograms"""
+    print(f"\n{C.BOLD}{C.M}╔══════════════════════════════════════════════════════════════╗{C.E}")
+    print(f"{C.BOLD}{C.M}║            METAPROGRAM STATUS (INFINITE LOOPS)               ║{C.E}")
+    print(f"{C.BOLD}{C.M}╚══════════════════════════════════════════════════════════════╝{C.E}\n")
+    
+    c = conn.cursor()
+    
+    # Get metaprograms from T_BIN
+    c.execute(f'''
+        SELECT bid, nam, typ, loop_enabled, size, crt
+        FROM {T_BIN}
+        WHERE typ = 'metaprogram'
+        ORDER BY bid
+    ''')
+    
+    metaprogs = c.fetchall()
+    
+    if not metaprogs:
+        print(f"{C.Y}No metaprograms found in database{C.E}\n")
+        return
+    
+    print(f"{C.BOLD}Metaprograms in Database:{C.E}\n")
+    
+    for bid, nam, typ, loop_enabled, size, crt in metaprogs:
+        print(f"{C.BOLD}BID {bid}: {nam}{C.E}")
+        print(f"  Type:         {typ}")
+        print(f"  Loop Enabled: {'YES' if loop_enabled else 'NO'}")
+        print(f"  Size:         {size} bytes")
+        print(f"  Created:      {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(crt))}")
+        
+        # Check for linked process
+        c.execute(f'''
+            SELECT p.pid, p.nam, p.sta, t.pc
+            FROM {T_PRC} p
+            JOIN {T_THR} t ON p.pid = t.pid
+            JOIN loop_state l ON l.pid = p.pid
+            WHERE l.bid = ?
+        ''', (bid,))
+        
+        proc_info = c.fetchone()
+        if proc_info:
+            pid, proc_name, status, pc = proc_info
+            status_color = C.G if status == 'RUNNING' else C.Y
+            print(f"  Process:      PID {pid} [{status_color}{status}{C.E}]")
+            print(f"  PC:           0x{pc:04X}")
+            
+            # Get loop state
+            c.execute('''
+                SELECT iteration, loop_start_pc, continue_flag
+                FROM loop_state
+                WHERE bid = ?
+            ''', (bid,))
+            
+            loop_info = c.fetchone()
+            if loop_info:
+                iteration, loop_start, cont_flag = loop_info
+                print(f"  Iteration:    {iteration}")
+                print(f"  Loop Start:   0x{loop_start:04X}")
+                print(f"  Continue:     {'YES' if cont_flag else 'NO'}")
+        else:
+            print(f"  {C.Y}Process:      Not linked{C.E}")
+        
+        # Check mutations
+        c.execute('''
+            SELECT COUNT(*) FROM mutation_history WHERE source_bid = ?
+        ''', (bid,))
+        mut_count = c.fetchone()[0]
+        print(f"  Mutations:    {mut_count}")
+        
+        # Check patches
+        if 'patcher' in nam.lower():
+            c.execute('SELECT COUNT(*) FROM patches WHERE applied = 1')
+            patch_count = c.fetchone()[0]
+            print(f"  Applied:      {patch_count} patches")
+        
+        # Check verifications
+        if 'verifier' in nam.lower():
+            c.execute('SELECT COUNT(*) FROM verify_log WHERE target_bid = ?', (bid,))
+            verify_count = c.fetchone()[0]
+            print(f"  Verified:     {verify_count} programs")
+        
+        print()
+    
+    # Show recent microcode log
+    c.execute('''
+        SELECT log_id, bid, pid, pc, opcode, tms
+        FROM microcode_log
+        ORDER BY log_id DESC
+        LIMIT 10
+    ''')
+    
+    logs = c.fetchall()
+    
+    if logs:
+        print(f"{C.BOLD}Recent Microcode Execution:{C.E}\n")
+        print(f"{'Log ID':>7} {'BID':>4} {'PID':>4} {'PC':>6} {'Opcode':>8} {'Time'}")
+        print(f"{'-'*55}")
+        
+        for log_id, bid, pid, pc, opcode, tms in logs:
+            time_str = time.strftime('%H:%M:%S', time.localtime(tms))
+            print(f"{log_id:>7} {bid:>4} {pid:>4} 0x{pc:04X} 0x{opcode:02X}     {time_str}")
+        print()
+
+
+def show_checkpoint_state(conn: sqlite3.Connection):
+    """Show checkpoint/rollback state"""
+    print(f"\n{C.BOLD}{C.C}═══ CHECKPOINT STATE ═══{C.E}\n")
+    
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT cid, pid, bid, pc, tms
+        FROM ckpt
+        ORDER BY cid DESC
+        LIMIT 20
+    ''')
+    
+    checkpoints = c.fetchall()
+    
+    if not checkpoints:
+        print(f"{C.Y}No checkpoints found{C.E}\n")
+        return
+    
+    print(f"{'CID':>5} {'PID':>4} {'BID':>4} {'PC':>6} {'Time'}")
+    print(f"{'-'*40}")
+    
+    for cid, pid, bid, pc, tms in checkpoints:
+        time_str = time.strftime('%H:%M:%S', time.localtime(tms))
+        print(f"{cid:>5} {pid:>4} {bid:>4} 0x{pc:04X} {time_str}")
+    
+    print()
+
+
+def show_patch_status(conn: sqlite3.Connection):
+    """Show patch application status"""
+    print(f"\n{C.BOLD}{C.C}═══ PATCH STATUS ═══{C.E}\n")
+    
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT patch_id, target_prog, description, applied, sandbox_tested, tms
+        FROM patches
+        ORDER BY patch_id DESC
+        LIMIT 20
+    ''')
+    
+    patches = c.fetchall()
+    
+    if not patches:
+        print(f"{C.Y}No patches found{C.E}\n")
+        return
+    
+    print(f"{'ID':>4} {'Target':20} {'Applied':>8} {'Tested':>7} {'Description'}")
+    print(f"{'-'*70}")
+    
+    for patch_id, target, desc, applied, tested, tms in patches:
+        status = f"{C.G}YES{C.E}" if applied else f"{C.Y}NO{C.E}"
+        tested_str = f"{C.G}YES{C.E}" if tested else f"{C.R}NO{C.E}"
+        desc_short = (desc[:30] + '...') if desc and len(desc) > 30 else (desc or '')
+        print(f"{patch_id:>4} {target:20} {status:>8} {tested_str:>7} {desc_short}")
+    
+    print()
+
+
+def show_program_genealogy(conn: sqlite3.Connection):
+    """Show program version tree (quine evolution)"""
+    print(f"\n{C.BOLD}{C.M}═══ PROGRAM GENEALOGY (QUINE EVOLUTION) ═══{C.E}\n")
+    
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT vid, parent_bid, child_bid, generation, fitness, tms
+        FROM prog_versions
+        ORDER BY generation, vid
+        LIMIT 50
+    ''')
+    
+    versions = c.fetchall()
+    
+    if not versions:
+        print(f"{C.Y}No program versions found{C.E}\n")
+        return
+    
+    print(f"{'VID':>5} {'Parent':>7} {'Child':>6} {'Gen':>4} {'Fitness':>8} {'Time'}")
+    print(f"{'-'*55}")
+    
+    for vid, parent, child, gen, fitness, tms in versions:
+        time_str = time.strftime('%H:%M:%S', time.localtime(tms))
+        parent_str = f"BID{parent}" if parent else "ROOT"
+        fitness_str = f"{fitness:.3f}" if fitness else "N/A"
+        print(f"{vid:>5} {parent_str:>7} BID{child:>3} {gen:>4} {fitness_str:>8} {time_str}")
+    
+    print()
+
+
+# [CONTINUE WITH REST OF QuantumExecutor CLASS - keeping all the gate operations and execution engine exactly as before, no changes needed]
+
+# ═══════════════════════════════════════════════════════════════════════════
 # QUANTUM EXECUTOR - FULL BINARY EXECUTION ON LATTICE
 # ═══════════════════════════════════════════════════════════════════════════
 
 class QuantumExecutor:
-    """
-    Execute quantum binaries directly on Leech lattice substrate
-    Routes instructions to individual qubits mapped to lattice points
-    Full access to opcodes, syscalls, and stored programs
-    """
+    """Execute quantum binaries directly on Leech lattice substrate"""
     
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self.cursor = conn.cursor()
         
-        # Initialize Qiskit simulator if available
         if QISKIT_AVAILABLE:
             self.sim = AerSimulator(method='statevector')
             print(f"{C.G}✓ Qiskit Aer backend initialized{C.E}")
@@ -373,13 +607,11 @@ class QuantumExecutor:
             self.sim = None
             print(f"{C.Y}⚠ Using classical fallback simulation{C.E}")
         
-        # Execution state
-        self.pc = 0  # Program counter
-        self.registers = {}  # Classical registers
+        self.pc = 0
+        self.registers = {}
         self.stack = []
         self.flags = {'zero': 0, 'carry': 0, 'overflow': 0}
         
-        # Load quantum substrate info
         self.load_substrate_info()
         self.load_opcodes()
         self.load_syscalls()
@@ -391,42 +623,35 @@ class QuantumExecutor:
         print(f"{C.C}  Programs loaded: {len(self.programs)}{C.E}\n")
     
     def load_substrate_info(self):
-        """Load quantum substrate information"""
-        # Count qubits
         self.cursor.execute(f'SELECT COUNT(*) FROM {T_PQB}')
         self.num_qubits = self.cursor.fetchone()[0]
         
-        # Count lattice points
         self.cursor.execute(f'SELECT COUNT(*) FROM {T_LAT}')
         self.num_lattice = self.cursor.fetchone()[0]
         
-        # Load qubit-to-lattice mapping
         self.cursor.execute(f'SELECT qid, lid, adr FROM {T_PQB} ORDER BY qid')
         self.qubit_map = {}
         for qid, lid, adr in self.cursor.fetchall():
             self.qubit_map[qid] = {'lid': lid, 'adr': adr}
     
     def load_opcodes(self):
-        """Load instruction set from database"""
         self.cursor.execute(f'SELECT opc, mne, nop FROM {T_INS}')
         self.opcodes = {}
         for opc, mne, nop in self.cursor.fetchall():
             self.opcodes[opc] = {'mne': mne, 'nop': nop}
         
-        # Merge with hardcoded opcodes
         for opc, (mne, nop) in OPCODES.items():
+            
             if opc not in self.opcodes:
                 self.opcodes[opc] = {'mne': mne, 'nop': nop}
     
     def load_syscalls(self):
-        """Load syscalls from database"""
         self.cursor.execute(f'SELECT sid, nam FROM {T_SYS}')
         self.syscalls = {}
         for sid, nam in self.cursor.fetchall():
             self.syscalls[sid] = nam
     
     def load_programs(self):
-        """Load compiled programs from database"""
         self.cursor.execute(f'SELECT bid, nam, cod, typ FROM {T_BIN}')
         self.programs = {}
         for bid, nam, cod, typ in self.cursor.fetchall():
@@ -437,7 +662,6 @@ class QuantumExecutor:
             }
     
     def get_qubit_state(self, qid: int) -> Tuple[complex, complex]:
-        """Get qubit state from database"""
         self.cursor.execute(f'''
             SELECT ar, ai, br, bi FROM {T_PQB} WHERE qid = ?
         ''', (qid,))
@@ -450,8 +674,6 @@ class QuantumExecutor:
         return (complex(ar, ai), complex(br, bi))
     
     def set_qubit_state(self, qid: int, alpha: complex, beta: complex, gate: str = 'SET'):
-        """Set qubit state in database"""
-        # Normalize
         norm = abs(alpha)**2 + abs(beta)**2
         if norm > 0:
             alpha /= np.sqrt(norm)
@@ -465,13 +687,11 @@ class QuantumExecutor:
         self.conn.commit()
     
     def route_to_qubit(self, qid: int) -> Dict:
-        """Route to specific lattice-mapped qubit"""
         if qid not in self.qubit_map:
             raise ValueError(f"Qubit {qid} not in substrate")
         
         mapping = self.qubit_map[qid]
         
-        # Get lattice point
         self.cursor.execute(f'SELECT crd, nrm FROM {T_LAT} WHERE lid = ?', (mapping['lid'],))
         row = self.cursor.fetchone()
         
@@ -491,11 +711,10 @@ class QuantumExecutor:
         }
     
     # ═══════════════════════════════════════════════════════════════════════
-    # QUANTUM GATE OPERATIONS
+    # QUANTUM GATE OPERATIONS (keeping all gates from original)
     # ═══════════════════════════════════════════════════════════════════════
     
     def gate_hadamard(self, qid: int):
-        """Apply Hadamard gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -509,18 +728,15 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # H = 1/√2 * [[1, 1], [1, -1]]
             sqrt2_inv = 1.0 / np.sqrt(2)
             new_alpha = sqrt2_inv * (alpha + beta)
             new_beta = sqrt2_inv * (alpha - beta)
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'H')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'H(q{qid}) executed on lattice point {route["lid"]}')
         print(f"  {C.C}H(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f} [lattice:{route['lid']}]{C.E}")
     
     def gate_pauli_x(self, qid: int):
-        """Apply Pauli-X gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -534,17 +750,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # X = [[0, 1], [1, 0]]
             new_alpha = beta
             new_beta = alpha
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'X')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'X(q{qid}) executed')
         print(f"  {C.C}X(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_pauli_y(self, qid: int):
-        """Apply Pauli-Y gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -558,17 +771,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # Y = [[0, -i], [i, 0]]
             new_alpha = -1j * beta
             new_beta = 1j * alpha
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'Y')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'Y(q{qid}) executed')
         print(f"  {C.C}Y(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_pauli_z(self, qid: int):
-        """Apply Pauli-Z gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -582,17 +792,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # Z = [[1, 0], [0, -1]]
             new_alpha = alpha
             new_beta = -beta
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'Z')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'Z(q{qid}) executed')
         print(f"  {C.C}Z(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_s(self, qid: int):
-        """Apply S gate (phase)"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -606,17 +813,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # S = [[1, 0], [0, i]]
             new_alpha = alpha
             new_beta = 1j * beta
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'S')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'S(q{qid}) executed')
         print(f"  {C.C}S(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_t(self, qid: int):
-        """Apply T gate (π/8)"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -630,18 +834,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # T = [[1, 0], [0, e^(iπ/4)]]
             new_alpha = alpha
             new_beta = beta * np.exp(1j * np.pi / 4)
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'T')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'T(q{qid}) executed')
         print(f"  {C.C}T(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
-    
     def gate_sdg(self, qid: int):
-        """Apply S† gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -655,17 +855,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # S† = [[1, 0], [0, -i]]
             new_alpha = alpha
             new_beta = -1j * beta
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'SDG')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'SDG(q{qid}) executed')
         print(f"  {C.C}SDG(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_tdg(self, qid: int):
-        """Apply T† gate"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
@@ -679,17 +876,14 @@ class QuantumExecutor:
             new_alpha = complex(sv[0])
             new_beta = complex(sv[1])
         else:
-            # T† = [[1, 0], [0, e^(-iπ/4)]]
             new_alpha = alpha
             new_beta = beta * np.exp(-1j * np.pi / 4)
         
         self.set_qubit_state(qid, new_alpha, new_beta, 'TDG')
-        
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'TDG(q{qid}) executed')
         print(f"  {C.C}TDG(q{qid}): α={new_alpha:.4f}, β={new_beta:.4f}{C.E}")
     
     def gate_cnot(self, ctrl_qid: int, tgt_qid: int):
-        """Apply CNOT gate"""
         ctrl_route = self.route_to_qubit(ctrl_qid)
         tgt_route = self.route_to_qubit(tgt_qid)
         
@@ -705,19 +899,15 @@ class QuantumExecutor:
             result = self.sim.run(qc, shots=1).result()
             sv = result.get_statevector()
             
-            # Extract individual qubit states (simplified)
-            # In reality, qubits are entangled
             prob_ctrl_1 = abs(ctrl_beta)**2
             
             if prob_ctrl_1 > 0.5:
-                # Control is |1⟩, flip target
                 new_tgt_alpha = tgt_beta
                 new_tgt_beta = tgt_alpha
             else:
                 new_tgt_alpha = tgt_alpha
                 new_tgt_beta = tgt_beta
         else:
-            # Classical simulation
             prob_ctrl_1 = abs(ctrl_beta)**2
             
             if prob_ctrl_1 > 0.5:
@@ -729,7 +919,6 @@ class QuantumExecutor:
         
         self.set_qubit_state(tgt_qid, new_tgt_alpha, new_tgt_beta, 'CNOT')
         
-        # Create entanglement entry
         self.cursor.execute(f'''
             INSERT INTO {T_ENT} VALUES (NULL, ?, ?, 'cnot', 0.95, ?)
         ''', (ctrl_qid, tgt_qid, time.time()))
@@ -740,7 +929,6 @@ class QuantumExecutor:
         print(f"  {C.C}CNOT(q{ctrl_qid}, q{tgt_qid}): entangled [lattice:{ctrl_route['lid']}↔{tgt_route['lid']}]{C.E}")
     
     def gate_cz(self, ctrl_qid: int, tgt_qid: int):
-        """Apply CZ gate"""
         ctrl_route = self.route_to_qubit(ctrl_qid)
         tgt_route = self.route_to_qubit(tgt_qid)
         
@@ -781,14 +969,12 @@ class QuantumExecutor:
         print(f"  {C.C}CZ(q{ctrl_qid}, q{tgt_qid}): phase applied{C.E}")
     
     def gate_swap(self, qid1: int, qid2: int):
-        """Apply SWAP gate"""
         route1 = self.route_to_qubit(qid1)
         route2 = self.route_to_qubit(qid2)
         
         alpha1, beta1 = self.get_qubit_state(qid1)
         alpha2, beta2 = self.get_qubit_state(qid2)
         
-        # Swap states
         self.set_qubit_state(qid1, alpha2, beta2, 'SWAP')
         self.set_qubit_state(qid2, alpha1, beta1, 'SWAP')
         
@@ -796,7 +982,6 @@ class QuantumExecutor:
         print(f"  {C.C}SWAP(q{qid1}, q{qid2}): states exchanged{C.E}")
     
     def gate_toffoli(self, ctrl1: int, ctrl2: int, tgt: int):
-        """Apply Toffoli (CCX) gate"""
         route1 = self.route_to_qubit(ctrl1)
         route2 = self.route_to_qubit(ctrl2)
         route_tgt = self.route_to_qubit(tgt)
@@ -815,7 +1000,6 @@ class QuantumExecutor:
             result = self.sim.run(qc, shots=1).result()
             sv = result.get_statevector()
             
-            # If both controls are |1⟩, flip target
             prob_c1_1 = abs(c1_beta)**2
             prob_c2_1 = abs(c2_beta)**2
             
@@ -842,30 +1026,24 @@ class QuantumExecutor:
         print(f"  {C.C}TOFFOLI(q{ctrl1}, q{ctrl2}, q{tgt}): CCX applied{C.E}")
     
     def gate_measure(self, qid: int) -> int:
-        """Measure qubit and collapse"""
         route = self.route_to_qubit(qid)
         alpha, beta = self.get_qubit_state(qid)
         
-        # Calculate probabilities
         prob_0 = abs(alpha)**2
         prob_1 = abs(beta)**2
         
-        # Normalize
         total = prob_0 + prob_1
         if total > 0:
             prob_0 /= total
             prob_1 /= total
         
-        # Measure (random collapse)
         result = 1 if np.random.random() < prob_1 else 0
         
-        # Collapse state
         if result == 0:
             self.set_qubit_state(qid, 1.0+0j, 0.0+0j, 'MEAS')
         else:
             self.set_qubit_state(qid, 0.0+0j, 1.0+0j, 'MEAS')
         
-        # Log measurement
         self.cursor.execute(f'''
             INSERT INTO {T_QMS} VALUES (NULL, 'measurement', ?, ?)
         ''', (json.dumps({'qid': qid, 'result': result, 'prob_0': prob_0, 'prob_1': prob_1}), time.time()))
@@ -878,14 +1056,12 @@ class QuantumExecutor:
         return result
     
     def gate_bell(self, qid1: int, qid2: int):
-        """Create Bell pair"""
         print(f"  {C.C}Creating Bell pair on q{qid1}, q{qid2}{C.E}")
         self.gate_hadamard(qid1)
         self.gate_cnot(qid1, qid2)
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'Bell pair created on q{qid1}, q{qid2}')
     
     def gate_ghz(self, qid1: int, qid2: int, qid3: int):
-        """Create GHZ state"""
         print(f"  {C.C}Creating GHZ state on q{qid1}, q{qid2}, q{qid3}{C.E}")
         self.gate_hadamard(qid1)
         self.gate_cnot(qid1, qid2)
@@ -893,16 +1069,13 @@ class QuantumExecutor:
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'GHZ state created on q{qid1}, q{qid2}, q{qid3}')
     
     def gate_w3(self, qid1: int, qid2: int, qid3: int):
-        """Create W-state (3 qubits)"""
         print(f"  {C.C}Creating W-state on q{qid1}, q{qid2}, q{qid3}{C.E}")
         
-        # W-state preparation (simplified)
         coeff = 1.0 / np.sqrt(3)
         
         for qid in [qid1, qid2, qid3]:
             self.set_qubit_state(qid, complex(coeff, 0), complex(coeff, 0), 'W3')
         
-        # Create entanglement
         for qa, qb in [(qid1, qid2), (qid1, qid3), (qid2, qid3)]:
             self.cursor.execute(f'''
                 INSERT INTO {T_ENT} VALUES (NULL, ?, ?, 'w_state', 0.99, ?)
@@ -912,7 +1085,6 @@ class QuantumExecutor:
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', f'W-state created on q{qid1}, q{qid2}, q{qid3}')
     
     def gate_w4(self, qid1: int, qid2: int, qid3: int, qid4: int):
-        """Create W-state (4 qubits)"""
         print(f"  {C.C}Creating W4-state on q{qid1}, q{qid2}, q{qid3}, q{qid4}{C.E}")
         
         coeff = 1.0 / np.sqrt(4)
@@ -927,16 +1099,13 @@ class QuantumExecutor:
     # ═══════════════════════════════════════════════════════════════════════
     
     def syscall_exit(self, code: int = 0):
-        """Exit syscall"""
         print(f"  {C.Y}SYSCALL: exit({code}){C.E}")
         log_to_channel(self.conn, 'SYSCALL', 'INFO', f'exit({code})')
-        return False  # Stop execution
+        return False
     
     def syscall_fork(self):
-        """Fork syscall - create new process"""
         print(f"  {C.Y}SYSCALL: fork(){C.E}")
         
-        # Create new process entry
         self.cursor.execute(f'''
             INSERT INTO {T_PRC} VALUES (NULL, 'user_process', 'READY', 10, ?)
         ''', (time.time(),))
@@ -950,17 +1119,13 @@ class QuantumExecutor:
         return new_pid
     
     def syscall_getpid(self):
-        """Get process ID"""
         print(f"  {C.Y}SYSCALL: getpid(){C.E}")
-        # Return current process (simplified - always 1 for now)
         log_to_channel(self.conn, 'SYSCALL', 'INFO', 'getpid() → 1')
         return 1
     
     def syscall_qalloc(self, num_qubits: int):
-        """Allocate qubits"""
         print(f"  {C.Y}SYSCALL: qalloc({num_qubits}){C.E}")
         
-        # Find available qubits
         self.cursor.execute(f'''
             SELECT qid FROM {T_PQB}
             WHERE typ = 'pseudoqubit'
@@ -976,14 +1141,12 @@ class QuantumExecutor:
         return allocated
     
     def syscall_qmeas(self, qid: int):
-        """Measure qubit syscall"""
         print(f"  {C.Y}SYSCALL: qmeas({qid}){C.E}")
         result = self.gate_measure(qid)
         log_to_channel(self.conn, 'SYSCALL', 'INFO', f'qmeas({qid}) → {result}')
         return result
     
     def syscall_qent(self, qid1: int, qid2: int):
-        """Create entanglement syscall"""
         print(f"  {C.Y}SYSCALL: qent({qid1}, {qid2}){C.E}")
         self.gate_bell(qid1, qid2)
         log_to_channel(self.conn, 'SYSCALL', 'INFO', f'qent({qid1}, {qid2})')
@@ -994,7 +1157,6 @@ class QuantumExecutor:
     # ═══════════════════════════════════════════════════════════════════════
     
     def execute_binary(self, bytecode: bytes, program_name: str = "user_program") -> Dict:
-        """Execute compiled quantum binary"""
         print(f"\n{C.BOLD}{C.Q}╔══════════════════════════════════════════════════════════════╗{C.E}")
         print(f"{C.BOLD}{C.Q}║  EXECUTING BINARY: {program_name:43s}║{C.E}")
         print(f"{C.BOLD}{C.Q}╚══════════════════════════════════════════════════════════════╝{C.E}\n")
@@ -1017,7 +1179,6 @@ class QuantumExecutor:
             mnemonic = inst_info['mne']
             num_ops = inst_info['nop']
             
-            # Extract operands (2 bytes each)
             operands = []
             for i in range(num_ops):
                 if self.pc + 1 + (i * 2) + 1 < len(bytecode):
@@ -1026,11 +1187,9 @@ class QuantumExecutor:
                         operand = struct.unpack('<H', op_bytes)[0]
                         operands.append(operand)
             
-            # Display instruction
             ops_str = ', '.join(map(str, operands))
             print(f"{C.BOLD}[0x{self.pc:04X}] {mnemonic:8s} {ops_str}{C.E}")
             
-            # Execute instruction
             continue_exec = self.execute_instruction(opcode, mnemonic, operands)
             
             if not continue_exec:
@@ -1038,10 +1197,8 @@ class QuantumExecutor:
             
             instruction_count += 1
             
-            # Advance PC
             self.pc += 1 + (num_ops * 2)
         
-        # Log execution complete
         log_to_channel(self.conn, 'EXECUTOR', 'INFO', 
                       f'Binary execution complete: {instruction_count} instructions')
         
@@ -1123,18 +1280,18 @@ class QuantumExecutor:
             # Syscalls
             elif mnemonic == 'SYSCALL' and len(operands) >= 1:
                 syscall_num = operands[0]
-                if syscall_num == 0:  # exit
-                    return self.syscall_exit(0) == False  # Returns False to stop
-                elif syscall_num == 1:  # fork
+                if syscall_num == 0:
+                    return self.syscall_exit(0) == False
+                elif syscall_num == 1:
                     self.syscall_fork()
-                elif syscall_num == 14:  # getpid
+                elif syscall_num == 14:
                     self.syscall_getpid()
-                elif syscall_num == 20:  # qalloc
+                elif syscall_num == 20:
                     self.syscall_qalloc(4)
-                elif syscall_num == 23:  # qmeas
+                elif syscall_num == 23:
                     if len(operands) >= 2:
                         self.syscall_qmeas(operands[1])
-                elif syscall_num == 24:  # qent
+                elif syscall_num == 24:
                     if len(operands) >= 3:
                         self.syscall_qent(operands[1], operands[2])
             
@@ -1143,7 +1300,7 @@ class QuantumExecutor:
             
             elif mnemonic == 'EXIT':
                 code = operands[0] if operands else 0
-                return not self.syscall_exit(code)  # Returns False to stop
+                return not self.syscall_exit(code)
             
             else:
                 print(f"  {C.GRAY}(instruction not fully implemented){C.E}")
@@ -1171,10 +1328,7 @@ class QuantumExecutor:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class QuantumScriptCompiler:
-    """
-    Compile quantum assembly scripts to executable bytecode
-    Supports multi-line input and full instruction set
-    """
+    """Compile quantum assembly scripts to executable bytecode"""
     
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -1190,13 +1344,11 @@ class QuantumScriptCompiler:
         for line in script.split('\n'):
             line_num += 1
             
-            # Remove comments and strip
             line = line.split('#')[0].strip()
             
             if not line:
                 continue
             
-            # Parse instruction
             parts = line.upper().split()
             if not parts:
                 continue
@@ -1204,36 +1356,31 @@ class QuantumScriptCompiler:
             mnemonic = parts[0]
             operands = []
             
-            # Parse operands
             for part in parts[1:]:
                 try:
                     operands.append(int(part))
                 except ValueError:
                     pass
             
-            # Get opcode
             if mnemonic not in MNEMONIC_TO_OPCODE:
                 print(f"{C.R}Line {line_num}: Unknown instruction '{mnemonic}'{C.E}")
                 continue
             
             opcode = MNEMONIC_TO_OPCODE[mnemonic]
             
-            # Encode instruction
             bytecode.append(opcode)
             
-            # Encode operands (2 bytes each)
             for op in operands:
                 bytecode.extend(struct.pack('<H', op & 0xFFFF))
             
-            print(f"  {C.C}Line {line_num:3d}: {mnemonic:8s} {', '.join(map(str, operands)):20s} → 0x{opcode:02X} [{' '.join(f'{b:02X}' for b in bytecode[-1-len(operands)*2:])}]{C.E}")
+            print(f"  {C.C}Line {line_num:3d}: {mnemonic:8s} {', '.join(map(str, operands)):20s} → 0x{opcode:02X}{C.E}")
         
         compiled_bytes = bytes(bytecode)
         
-        # Store in database
+        # Store in database - FIX: add missing columns
         self.cursor.execute(f'''
-            INSERT INTO {T_BIN} VALUES (NULL, ?, ?, 'userland')
-        ''', (program_name, compiled_bytes))
-        
+            INSERT INTO {T_BIN} VALUES (NULL, ?, ?, 'userland', 0, ?, 0, ?)
+        ''', (program_name, compiled_bytes, len(compiled_bytes), time.time()))
         
         program_id = self.cursor.lastrowid
         self.conn.commit()
@@ -1251,10 +1398,7 @@ class QuantumScriptCompiler:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class PythonToQuantumCompiler:
-    """
-    Compile Python code to quantum bytecode
-    Supports quantum operations through Python syntax
-    """
+    """Compile Python code to quantum bytecode"""
     
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -1267,14 +1411,12 @@ class PythonToQuantumCompiler:
         bytecode = bytearray()
         
         try:
-            # Parse Python AST
             tree = ast.parse(code)
             
             print(f"{C.C}Analyzing AST...{C.E}")
             
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call):
-                    # Check for quantum function calls
                     func_name = None
                     
                     if isinstance(node.func, ast.Name):
@@ -1283,7 +1425,6 @@ class PythonToQuantumCompiler:
                         func_name = node.func.attr
                     
                     if func_name:
-                        # Extract arguments
                         args = []
                         for arg in node.args:
                             if isinstance(arg, ast.Constant):
@@ -1291,29 +1432,28 @@ class PythonToQuantumCompiler:
                             elif isinstance(arg, ast.Num):
                                 args.append(arg.n)
                         
-                        # Map Python functions to opcodes
                         opcode = None
                         
                         if func_name in ['h', 'hadamard']:
-                            opcode = 0x02  # QH
+                            opcode = 0x02
                         elif func_name in ['x', 'pauli_x', 'not_gate']:
-                            opcode = 0x03  # QX
+                            opcode = 0x03
                         elif func_name in ['y', 'pauli_y']:
-                            opcode = 0x04  # QY
+                            opcode = 0x04
                         elif func_name in ['z', 'pauli_z']:
-                            opcode = 0x05  # QZ
+                            opcode = 0x05
                         elif func_name in ['s', 'phase']:
-                            opcode = 0x06  # QS
+                            opcode = 0x06
                         elif func_name in ['t', 't_gate']:
-                            opcode = 0x07  # QT
+                            opcode = 0x07
                         elif func_name in ['cnot', 'cx']:
-                            opcode = 0x0B  # QCNOT
+                            opcode = 0x0B
                         elif func_name in ['measure', 'meas']:
-                            opcode = 0x10  # QMEAS
+                            opcode = 0x10
                         elif func_name in ['bell', 'bell_pair']:
-                            opcode = 0x14  # QBELL
+                            opcode = 0x14
                         elif func_name in ['ghz']:
-                            opcode = 0x15  # QGHZ
+                            opcode = 0x15
                         
                         if opcode:
                             bytecode.append(opcode)
@@ -1323,15 +1463,14 @@ class PythonToQuantumCompiler:
                             
                             print(f"  {C.C}{func_name}({', '.join(map(str, args))}) → opcode 0x{opcode:02X}{C.E}")
             
-            # Add HALT at end
             bytecode.append(0x41)
             
             compiled_bytes = bytes(bytecode)
             
-            # Store in database
+            # FIX: add missing columns
             self.cursor.execute(f'''
-                INSERT INTO {T_BIN} VALUES (NULL, ?, ?, 'python')
-            ''', (program_name, compiled_bytes))
+                INSERT INTO {T_BIN} VALUES (NULL, ?, ?, 'python', 0, ?, 0, ?)
+            ''', (program_name, compiled_bytes, len(compiled_bytes), time.time()))
             
             program_id = self.cursor.lastrowid
             self.conn.commit()
@@ -1354,10 +1493,7 @@ class PythonToQuantumCompiler:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class DevelopmentCLI:
-    """
-    Full-featured development environment
-    Complete access to all system components
-    """
+    """Full-featured development environment"""
     
     def __init__(self):
         if not DB_PATH.exists():
@@ -1372,13 +1508,10 @@ class DevelopmentCLI:
         print(f"{C.BOLD}{C.W}║   Full Binary Execution on Leech Lattice Substrate           ║{C.E}")
         print(f"{C.BOLD}{C.W}╚══════════════════════════════════════════════════════════════╝{C.E}\n")
         
-        # Initialize output channel
         initialize_output_channel(self.conn)
         
-        # Check if kernel is booted
         self.check_kernel_state()
         
-        # Initialize components
         self.executor = QuantumExecutor(self.conn)
         self.script_compiler = QuantumScriptCompiler(self.conn)
         self.python_compiler = PythonToQuantumCompiler(self.conn)
@@ -1386,7 +1519,6 @@ class DevelopmentCLI:
         print(f"{C.G}✓ Development tools ready{C.E}\n")
     
     def check_kernel_state(self):
-        """Check if kernel is booted"""
         c = self.conn.cursor()
         c.execute("SELECT val FROM meta WHERE key='kernel_state'")
         row = c.fetchone()
@@ -1405,7 +1537,6 @@ class DevelopmentCLI:
         print()
     
     def show_menu(self):
-        """Display main menu"""
         print(f"\n{C.BOLD}{C.Q}╔══════════════════════════════════════════════════════════════╗{C.E}")
         print(f"{C.BOLD}{C.Q}║              QUNIX DEVELOPMENT MENU                          ║{C.E}")
         print(f"{C.BOLD}{C.Q}╚══════════════════════════════════════════════════════════════╝{C.E}\n")
@@ -1416,6 +1547,10 @@ class DevelopmentCLI:
         print(f"  3. Show Kernel State")
         print(f"  4. Show Entanglement Map")
         print(f"  5. Show Output Channel")
+        print(f"  6. Show Metaprogram Status")
+        print(f"  7. Show Checkpoint State")
+        print(f"  8. Show Patch Status")
+        print(f"  9. Show Program Genealogy")
         
         print(f"\n{C.BOLD}Execution:{C.E}")
         print(f"  10. List All Programs")
@@ -1450,16 +1585,13 @@ class DevelopmentCLI:
         print()
     
     def boot_kernel(self):
-        """Boot the quantum kernel"""
         boot_quantum_kernel(self.conn)
     
     def show_system_info(self):
-        """Display system information"""
         c = self.conn.cursor()
         
         print(f"\n{C.BOLD}{C.C}═══ SYSTEM INFORMATION ═══{C.E}\n")
         
-        # Metadata
         c.execute("SELECT key, val FROM meta ORDER BY key")
         print(f"{C.BOLD}Metadata:{C.E}")
         for key, val in c.fetchall():
@@ -1467,7 +1599,6 @@ class DevelopmentCLI:
         
         print()
         
-        # Counts
         c.execute(f'SELECT COUNT(*) FROM {T_LAT}')
         n_lat = c.fetchone()[0]
         
@@ -1493,12 +1624,10 @@ class DevelopmentCLI:
         print()
     
     def show_kernel_state(self):
-        """Show kernel state details"""
         c = self.conn.cursor()
         
         print(f"\n{C.BOLD}{C.C}═══ KERNEL STATE ═══{C.E}\n")
         
-        # Get boot qubits (0, 1, 2)
         c.execute(f'''
             SELECT qid, ar, ai, br, bi, gat, typ
             FROM {T_PQB}
@@ -1518,7 +1647,6 @@ class DevelopmentCLI:
             print(f"      P(|0⟩) = {prob_0:.4f}, P(|1⟩) = {prob_1:.4f}")
             print()
         
-        # Show recent kernel events
         c.execute('''
             SELECT timestamp, event_type, details
             FROM kernel_log
@@ -1536,7 +1664,6 @@ class DevelopmentCLI:
         print()
     
     def show_entanglement_map(self):
-        """Show entanglement connections"""
         c = self.conn.cursor()
         
         print(f"\n{C.BOLD}{C.C}═══ ENTANGLEMENT MAP ═══{C.E}\n")
@@ -1562,31 +1689,28 @@ class DevelopmentCLI:
         print(f"\n{C.C}Total entanglements: {len(entanglements)}{C.E}\n")
     
     def show_output_channel(self):
-        """Display output channel"""
         read_output_channel(self.conn)
     
     def list_programs(self):
-        """List all compiled programs"""
         c = self.conn.cursor()
         
         print(f"\n{C.BOLD}{C.C}═══ COMPILED PROGRAMS ═══{C.E}\n")
         
         c.execute(f'''
-            SELECT bid, nam, typ, LENGTH(cod)
+            SELECT bid, nam, typ, size
             FROM {T_BIN}
             ORDER BY bid
         ''')
         
-        print(f"{'ID':>4} {'Name':25} {'Type':12} {'Size':>8}")
-        print(f"{'-'*55}")
+        print(f"{'ID':>4} {'Name':30} {'Type':15} {'Size':>8}")
+        print(f"{'-'*65}")
         
         for bid, nam, typ, size in c.fetchall():
-            print(f"{bid:>4} {nam:25} {typ:12} {size:>6}B")
+            print(f"{bid:>4} {nam:30} {typ:15} {size:>6}B")
         
         print()
     
     def execute_program_interactive(self):
-        """Execute program by name (interactive)"""
         self.list_programs()
         
         name = input(f"\n{C.C}Program name to execute: {C.E}").strip()
@@ -1595,17 +1719,15 @@ class DevelopmentCLI:
             self.executor.execute_program_by_name(name)
     
     def execute_builtin(self, program_name: str):
-        """Execute built-in program"""
         self.executor.execute_program_by_name(program_name)
     
     def write_quantum_script(self):
-        """Interactive quantum script editor"""
         print(f"\n{C.BOLD}{C.C}═══ QUANTUM SCRIPT EDITOR ═══{C.E}\n")
         print(f"{C.C}Enter quantum assembly code (type 'END' on a new line to finish):{C.E}")
         print(f"{C.GRAY}Example:{C.E}")
         print(f"{C.GRAY}  H 0        # Hadamard on qubit 0{C.E}")
         print(f"{C.GRAY}  CNOT 0 1   # CNOT control=0, target=1{C.E}")
-        print(f"{C.GRAY}  MEAS 0     # Measure qubit 0{C.E}")
+        print(f"{C.GRAY}  QMEAS 0    # Measure qubit 0{C.E}")
         print(f"{C.GRAY}  HALT       # End program{C.E}\n")
         
         lines = []
@@ -1634,7 +1756,6 @@ class DevelopmentCLI:
         return script, name
     
     def compile_and_execute_script(self):
-        """Compile and execute quantum script"""
         result = self.write_quantum_script()
         
         if not result:
@@ -1642,17 +1763,14 @@ class DevelopmentCLI:
         
         script, name = result
         
-        # Compile
         bytecode = self.script_compiler.compile_script(script, name)
         
-        # Execute?
         execute = input(f"{C.C}Execute now? (y/n): {C.E}").lower()
         
         if execute == 'y':
             self.executor.execute_binary(bytecode, name)
     
     def write_python_code(self):
-        """Interactive Python code editor"""
         print(f"\n{C.BOLD}{C.C}═══ PYTHON TO QUANTUM COMPILER ═══{C.E}\n")
         print(f"{C.C}Enter Python code (type 'END' on a new line to finish):{C.E}")
         print(f"{C.GRAY}Example:{C.E}")
@@ -1686,7 +1804,6 @@ class DevelopmentCLI:
         return code, name
     
     def compile_and_execute_python(self):
-        """Compile and execute Python code"""
         result = self.write_python_code()
         
         if not result:
@@ -1694,17 +1811,14 @@ class DevelopmentCLI:
         
         code, name = result
         
-        # Compile
         bytecode = self.python_compiler.compile_python(code, name)
         
-        # Execute?
         execute = input(f"{C.C}Execute now? (y/n): {C.E}").lower()
         
         if execute == 'y':
             self.executor.execute_binary(bytecode, name)
     
     def interactive_quantum_ops(self):
-        """Interactive quantum operations"""
         print(f"\n{C.BOLD}{C.C}═══ INTERACTIVE QUANTUM MODE ═══{C.E}\n")
         print(f"{C.C}Commands:{C.E}")
         print(f"  H <qubit>              - Hadamard")
@@ -1714,10 +1828,10 @@ class DevelopmentCLI:
         print(f"  S <qubit>              - S gate")
         print(f"  T <qubit>              - T gate")
         print(f"  CNOT <ctrl> <tgt>      - CNOT")
-        print(f"  MEAS <qubit>           - Measure")
+        print(f"  QMEAS <qubit>          - Measure")
         print(f"  STATE <qubit>          - Show state")
-        print(f"  BELL <q1> <q2>         - Bell pair")
-        print(f"  GHZ <q1> <q2> <q3>     - GHZ state")
+        print(f"  QBELL <q1> <q2>        - Bell pair")
+        print(f"  QGHZ <q1> <q2> <q3>    - GHZ state")
         print(f"  DONE                   - Exit")
         print()
         
@@ -1756,16 +1870,16 @@ class DevelopmentCLI:
                 elif op == 'CNOT' and len(args) >= 2:
                     self.executor.gate_cnot(args[0], args[1])
                 
-                elif op == 'MEAS' and args:
+                elif op == 'QMEAS' and args:
                     self.executor.gate_measure(args[0])
                 
                 elif op == 'STATE' and args:
                     self.show_qubit_state_detail(args[0])
                 
-                elif op == 'BELL' and len(args) >= 2:
+                elif op == 'QBELL' and len(args) >= 2:
                     self.executor.gate_bell(args[0], args[1])
                 
-                elif op == 'GHZ' and len(args) >= 3:
+                elif op == 'QGHZ' and len(args) >= 3:
                     self.executor.gate_ghz(args[0], args[1], args[2])
                 
                 else:
@@ -1779,48 +1893,48 @@ class DevelopmentCLI:
         print(f"{C.G}Interactive mode ended{C.E}\n")
     
     def load_example(self, example_type: str):
-        """Load and execute example"""
         examples = {
             'bell': """# Bell State |Φ+⟩ = (|00⟩ + |11⟩)/√2
-H 0        # Hadamard on qubit 0
-CNOT 0 1   # CNOT control=0, target=1
-MEAS 0     # Measure qubit 0
-MEAS 1     # Measure qubit 1
+QH 0
+QCNOT 0 1
+QMEAS 0
+
+QMEAS 1
 HALT""",
             
             'ghz': """# GHZ State |GHZ⟩ = (|000⟩ + |111⟩)/√2
-H 0        # Hadamard on qubit 0
-CNOT 0 1   # CNOT 0→1
-CNOT 0 2   # CNOT 0→2
-MEAS 0
-MEAS 1
-MEAS 2
+QH 0
+QCNOT 0 1
+QCNOT 0 2
+QMEAS 0
+QMEAS 1
+QMEAS 2
 HALT""",
             
             'w': """# W-State
-QW3 0 1 2  # Create W-state on qubits 0,1,2
-MEAS 0
-MEAS 1
-MEAS 2
+QW3 0 1 2
+QMEAS 0
+QMEAS 1
+QMEAS 2
 HALT""",
             
             'deutsch': """# Deutsch Algorithm (simplified)
-X 1        # Initialize oracle qubit to |1⟩
-H 0        # Hadamard on input
-H 1        # Hadamard on oracle
-CNOT 0 1   # Oracle (identity function)
-H 0        # Hadamard on input
-MEAS 0     # Measure input
+QX 1
+QH 0
+QH 1
+QCNOT 0 1
+QH 0
+QMEAS 0
 HALT""",
             
             'teleport': """# Quantum Teleportation (simplified)
-H 1        # Create Bell pair
-CNOT 1 2   
-CNOT 0 1   # Bell measurement
-H 0
-MEAS 0
-MEAS 1
-MEAS 2
+QH 1
+QCNOT 1 2
+QCNOT 0 1
+QH 0
+QMEAS 0
+QMEAS 1
+QMEAS 2
 HALT"""
         }
         
@@ -1838,7 +1952,6 @@ HALT"""
         self.executor.execute_binary(bytecode, name)
     
     def show_qubit_state_detail(self, qid: int):
-        """Show detailed qubit state"""
         c = self.conn.cursor()
         
         print(f"\n{C.BOLD}Qubit {qid} State:{C.E}")
@@ -1870,7 +1983,6 @@ HALT"""
         print(f"  Lattice ID:    {lid}")
         print(f"  Address:       {adr}")
         
-        # Check entanglement
         c.execute(f'''
             SELECT qb, typ, str FROM {T_ENT} WHERE qa = ?
             UNION
@@ -1886,7 +1998,6 @@ HALT"""
         print()
     
     def show_lattice_mapping(self):
-        """Show qubit-to-lattice mapping"""
         qid_str = input(f"{C.C}Qubit ID: {C.E}").strip()
         
         try:
@@ -1909,7 +2020,6 @@ HALT"""
         print()
     
     def show_program_bytecode(self):
-        """Show program bytecode"""
         self.list_programs()
         
         name = input(f"\n{C.C}Program name: {C.E}").strip()
@@ -1926,7 +2036,6 @@ HALT"""
         print(f"  Size: {len(bytecode)} bytes")
         print(f"\n{C.BOLD}Bytecode:{C.E}")
         
-        # Display as hex dump
         for i in range(0, len(bytecode), 16):
             chunk = bytecode[i:i+16]
             hex_str = ' '.join(f'{b:02X}' for b in chunk)
@@ -1936,7 +2045,6 @@ HALT"""
         print()
     
     def show_syscall_table(self):
-        """Show syscall table"""
         print(f"\n{C.BOLD}{C.C}═══ SYSCALL TABLE ═══{C.E}\n")
         
         print(f"{'Number':>6} {'Name':20} {'Description'}")
@@ -1947,7 +2055,6 @@ HALT"""
             (1, 'fork', 'Create new process'),
             (14, 'getpid', 'Get process ID'),
             (20, 'qalloc', 'Allocate qubits'),
-            
             (23, 'qmeas', 'Measure qubit'),
             (24, 'qent', 'Create entanglement'),
         ]
@@ -1958,7 +2065,6 @@ HALT"""
         print()
     
     def show_opcode_table(self):
-        """Show opcode table"""
         print(f"\n{C.BOLD}{C.C}═══ OPCODE TABLE ═══{C.E}\n")
         
         print(f"{'Opcode':>6} {'Mnemonic':12} {'Ops':>4} {'Description'}")
@@ -1991,6 +2097,18 @@ HALT"""
             0x44: 'Subtract registers',
             0x80: 'Load from memory',
             0x81: 'Store to memory',
+            0xA0: 'Self read',
+            0xA1: 'Self mutate',
+            0xA2: 'Self fork',
+            0xA3: 'Verify',
+            0xA4: 'Rollback',
+            0xA5: 'Checkpoint',
+            0xA6: 'Patch apply',
+            0xA7: 'Loop start',
+            0xA8: 'Loop end',
+            0xA9: 'Symbolic state',
+            0xAA: 'CTC backprop',
+            0xAB: 'Entangle mutate',
             0xE0: 'System call',
             0xE1: 'Fork process',
             0xE3: 'Exit process',
@@ -2027,6 +2145,14 @@ HALT"""
                     self.show_entanglement_map()
                 elif choice == '5':
                     self.show_output_channel()
+                elif choice == '6':
+                    show_metaprogram_status(self.conn)
+                elif choice == '7':
+                    show_checkpoint_state(self.conn)
+                elif choice == '8':
+                    show_patch_status(self.conn)
+                elif choice == '9':
+                    show_program_genealogy(self.conn)
                 
                 # Execution
                 elif choice == '10':
@@ -2110,7 +2236,6 @@ def inspect_database():
     
     print(f"\n{C.BOLD}{C.C}═══ DATABASE INSPECTION ═══{C.E}\n")
     
-    # List tables
     c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     tables = [row[0] for row in c.fetchall()]
     
@@ -2122,8 +2247,7 @@ def inspect_database():
     
     print()
     
-    # Show metadata
-    c.execute("SELECT key, val FROM meta WHERE key IN ('os', 'ver', 'state', 'kernel_state')")
+    c.execute("SELECT key, val FROM meta")
     meta = c.fetchall()
     
     if meta:
@@ -2143,7 +2267,6 @@ def quick_boot():
     
     conn = sqlite3.connect(str(DB_PATH))
     
-    # Check if already booted
     c = conn.cursor()
     c.execute("SELECT val FROM meta WHERE key='kernel_state'")
     row = c.fetchone()
@@ -2166,10 +2289,8 @@ def test_execution():
     
     conn = sqlite3.connect(str(DB_PATH))
     
-    # Initialize
     initialize_output_channel(conn)
     
-    # Check boot
     c = conn.cursor()
     c.execute("SELECT val FROM meta WHERE key='kernel_state'")
     row = c.fetchone()
@@ -2178,10 +2299,8 @@ def test_execution():
         print(f"{C.C}Booting kernel first...{C.E}")
         boot_quantum_kernel(conn)
     
-    # Create executor
     executor = QuantumExecutor(conn)
     
-    # Execute bell pair
     print(f"\n{C.C}Testing Bell pair execution...{C.E}\n")
     executor.execute_program_by_name('bell_pair')
     
@@ -2195,7 +2314,6 @@ def test_execution():
 def main():
     """Main entry point"""
     
-    # Check for command line arguments
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         
@@ -2210,7 +2328,7 @@ def main():
             return
         elif cmd == 'help':
             print(f"""
-{C.BOLD}QUNIX Development Tools{C.E}
+{C.BOLD}QUNIX Development Tools v3.0{C.E}
 
 Usage:
   {sys.argv[0]}              - Start interactive CLI
@@ -2219,18 +2337,42 @@ Usage:
   {sys.argv[0]} test         - Test program execution
   {sys.argv[0]} help         - Show this help
 
-Interactive mode provides full access to:
-  • Quantum kernel boot with W-state tripartite
+{C.BOLD}Features:{C.E}
+  • Quantum kernel boot with W-state tripartite entanglement
   • Binary program execution on lattice-mapped qubits
-  • Quantum script compilation
+  • Quantum script compilation (assembly → bytecode)
   • Python to quantum bytecode compilation
-  • Interactive quantum operations
+  • Interactive quantum operations REPL
+  • Metaprogram monitoring (quine evolver, live patcher, verifier)
+  • Checkpoint/rollback state inspection
+  • Patch application status
+  • Program genealogy tracking (quine evolution)
   • Complete system inspection tools
-  • All opcodes, syscalls, and stored programs
+  • All opcodes (0x00-0xFF), syscalls, and stored programs
+
+{C.BOLD}Database:{C.E}
+  Location: {DB_PATH}
+  
+{C.BOLD}Metaprograms:{C.E}
+  The system includes three infinite-loop metaprograms:
+    • quine_evolver      - Self-mutating quantum quine
+    • live_patcher       - Runtime code patcher with CTC
+    • symbolic_verifier  - Self-verifying symbolic executor
+  
+  These run from database bytecode and can modify themselves
+  and each other using CTC (closed timelike curve) backpropagation.
+
+{C.BOLD}Integration:{C.E}
+  This CLI fully integrates with the builder's metaprogramming system:
+    • Monitors loop_state table for execution iterations
+    • Tracks mutation_history for quine evolution
+    • Displays patches table for live patching
+    • Shows verify_log for symbolic verification
+    • Accesses prog_versions for genealogy tracking
+    • Reads microcode_log for execution history
 """)
             return
     
-    # Start interactive CLI
     try:
         cli = DevelopmentCLI()
         cli.run()
