@@ -1,641 +1,557 @@
-
 #!/usr/bin/env python3
 """
-QUNIX Web Interface
-Flask app for visualizing and interacting with the quantum OS
+QUNIX HuggingFace Space - Web Terminal Interface with Auto-Bootstrap
+Automatically builds database on first run, handles path detection
 """
 
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+import asyncio
+import pty
 import os
-import sqlite3
-import json
-import time
+import select
+import subprocess
+import signal
 from pathlib import Path
-from flask import Flask, render_template, jsonify, request
-import numpy as np
+import uvicorn
+import shutil
+import sys
+import sqlite3
+
+app = FastAPI()
 
 # ═══════════════════════════════════════════════════════════════════════════
-# DATABASE PATH CONFIGURATION - MATCHES BUILDER AND DEV_CLI
+# PATH RESOLUTION - FIND PERSISTENT STORAGE
 # ═══════════════════════════════════════════════════════════════════════════
 
-RENDER_DISK_PATH = os.environ.get('RENDER_DISK_PATH', '/data')
-DATA_DIR = Path(RENDER_DISK_PATH)
+def find_persistent_storage():
+    """
+    Find the best persistent storage location
+    Priority: /data > /datasets > ~/qunix_data > ./qunix_data
+    """
+    APP_DIR = Path(__file__).parent.absolute()
+    
+    candidates = [
+        Path("/data"),
+        Path("/datasets"),
+        Path.home() / "qunix_data",
+        APP_DIR / "qunix_data",
+        APP_DIR  # Fallback to app directory
+    ]
+    
+    for path in candidates:
+        if path.exists() and os.access(str(path), os.W_OK):
+            return path, APP_DIR
+        elif not path.exists():
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                if os.access(str(path), os.W_OK):
+                    return path, APP_DIR
+            except:
+                continue
+    
+    # Absolute fallback
+    return APP_DIR, APP_DIR
 
-# Fallback to current directory if /data not writable
-if not DATA_DIR.exists() or not os.access(str(DATA_DIR), os.W_OK):
-    print(f"⚠ {DATA_DIR} not accessible, using current directory")
-    DATA_DIR = Path.cwd()
-
+DATA_DIR, APP_DIR = find_persistent_storage()
 DB_PATH = DATA_DIR / "qunix_leech.db"
 
-print(f"Database location: {DB_PATH}")
+print(f"[INIT] Application directory: {APP_DIR}")
+print(f"[INIT] Data directory: {DATA_DIR}")
+print(f"[INIT] Database path: {DB_PATH}")
 
-# Table names
-T_LAT="lat";T_PQB="pqb";T_TRI="tri";T_PRC="prc";T_THR="thr";T_MEM="mem"
-T_SYS="sys";T_INT="int";T_SIG="sig";T_IPC="ipc";T_PIP="pip";T_SKT="skt"
-T_FIL="fil";T_INO="ino";T_DIR="dir";T_NET="net";T_QMS="qms";T_ENT="ent"
-T_CLK="clk";T_REG="reg";T_INS="ins";T_STK="stk";T_HEP="hep";T_TLB="tlb"
-T_PGT="pgt";T_BIN="bin";T_QEX="qex"
+# Track active sessions
+active_sessions = {}
 
-app = Flask(__name__)
+# ═══════════════════════════════════════════════════════════════════════════
+# DATABASE AUTO-BUILDER
+# ═══════════════════════════════════════════════════════════════════════════
 
-def get_db():
-    """Get database connection"""
+def check_database_valid() -> bool:
+    """Check if database exists and is valid"""
     if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found at {DB_PATH}. Run qunix-leech-builder.py first.")
-    return sqlite3.connect(str(DB_PATH))
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# WEB ROUTES
-# ═══════════════════════════════════════════════════════════════════════════
-
-@app.route('/')
-def index():
-    """Main dashboard"""
-    return render_template('index.html')
-
-
-@app.route('/api/status')
-def api_status():
-    """Get system status"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        # Get counts
-        c.execute(f'SELECT COUNT(*) FROM {T_LAT}')
-        lattice_count = c.fetchone()[0]
-        
-        c.execute(f'SELECT COUNT(*) FROM {T_PQB}')
-        qubit_count = c.fetchone()[0]
-        
-        c.execute(f'SELECT COUNT(*) FROM {T_TRI}')
-        triangle_count = c.fetchone()[0]
-        
-        c.execute(f'SELECT COUNT(*) FROM {T_ENT}')
-        entanglement_count = c.fetchone()[0]
-        
-        c.execute(f'SELECT COUNT(*) FROM {T_BIN}')
-        program_count = c.fetchone()[0]
-        
-        c.execute(f'SELECT COUNT(*) FROM {T_PRC}')
-        process_count = c.fetchone()[0]
-        
-        # Get metadata
-        c.execute("SELECT key, val FROM meta")
-        metadata = dict(c.fetchall())
-        
-        # Get kernel state
-        c.execute("SELECT val FROM meta WHERE key='kernel_state'")
-        row = c.fetchone()
-        kernel_state = row[0] if row else "NOT_BOOTED"
-        
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'lattice_points': lattice_count,
-            'qubits': qubit_count,
-            'triangles': triangle_count,
-            'entanglements': entanglement_count,
-            'programs': program_count,
-            'processes': process_count,
-            'kernel_state': kernel_state,
-            'metadata': metadata,
-            'database_path': str(DB_PATH),
-            'database_size': os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
-        })
+        return False
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/qubits')
-def api_qubits():
-    """Get qubit information"""
+    size_mb = DB_PATH.stat().st_size / (1024 * 1024)
+    if size_mb < 0.1:  # Too small
+        return False
+    
+    # Try to open it
     try:
-        conn = get_db()
+        conn = sqlite3.connect(str(DB_PATH))
         c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+        count = c.fetchone()[0]
+        conn.close()
+        return count > 10  # Should have many tables
+    except:
+        return False
+
+
+def build_database_if_needed():
+    """Build database if it doesn't exist"""
+    if check_database_valid():
+        print(f"[INIT] ✓ Database exists: {DB_PATH}")
+        return True
+    
+    print(f"[INIT] ⚠ Database missing or invalid - building...")
+    
+    # Find builder script
+    builder_candidates = [
+        APP_DIR / "qunix-leech-builder.py",
+        Path.cwd() / "qunix-leech-builder.py",
+    ]
+    
+    builder_path = None
+    for candidate in builder_candidates:
+        if candidate.exists():
+            builder_path = candidate
+            break
+    
+    if not builder_path:
+        print(f"[INIT] ✗ Builder script not found!")
+        return False
+    
+    print(f"[INIT] Running builder: {builder_path}")
+    
+    # Set environment
+    env = os.environ.copy()
+    env['RENDER_DISK_PATH'] = str(DATA_DIR)
+    env['PYTHONUNBUFFERED'] = '1'
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, str(builder_path)],
+            env=env,
+            cwd=str(DATA_DIR),
+            timeout=300,  # 5 min timeout
+            capture_output=True,
+            text=True
+        )
         
-        limit = int(request.args.get('limit', 100))
-        offset = int(request.args.get('offset', 0))
-        
-        c.execute(f'''
-            SELECT qid, lid, typ, ar, ai, br, bi, gat, adr
-            FROM {T_PQB}
-            ORDER BY qid
-            LIMIT ? OFFSET ?
-        ''', (limit, offset))
-        
-        qubits = []
-        for row in c.fetchall():
-            qid, lid, typ, ar, ai, br, bi, gate, adr = row
-            alpha = complex(ar, ai)
-            beta = complex(br, bi)
-            prob_0 = abs(alpha)**2
-            prob_1 = abs(beta)**2
+        if result.returncode == 0 and check_database_valid():
+            print(f"[INIT] ✓ Database built successfully")
+            return True
+        else:
+            print(f"[INIT] ✗ Builder failed:")
+            print(result.stdout[-500:] if result.stdout else "")
+            print(result.stderr[-500:] if result.stderr else "")
+            return False
             
-            qubits.append({
-                'qid': qid,
-                'lid': lid,
-                'type': typ,
-                'alpha_real': ar,
-                'alpha_imag': ai,
-                'beta_real': br,
-                'beta_imag': bi,
-                'prob_0': prob_0,
-                'prob_1': prob_1,
-                'gate': gate,
-                'address': adr
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'qubits': qubits})
-    
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"[INIT] ✗ Builder exception: {e}")
+        return False
 
 
-@app.route('/api/qubit/<int:qid>')
-def api_qubit_detail(qid):
-    """Get detailed qubit information"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
+# Build on startup
+DB_READY = build_database_if_needed()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HTML TEMPLATE (same as before)
+# ═══════════════════════════════════════════════════════════════════════════
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QUNIX Web Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0e27;
+            font-family: 'Monaco', monospace;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 20px;
+            gap: 15px;
+        }
+        #header {
+            background: linear-gradient(135deg, #1a1f3a 0%, #2d1b4e 100%);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #00ff41;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+        }
+        h1 {
+            color: #00ff41;
+            text-align: center;
+            margin: 0 0 15px 0;
+            font-size: 24px;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+        }
+        #status {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            color: #00d4ff;
+            font-size: 14px;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            box-shadow: 0 0 5px rgba(255, 68, 68, 0.5);
+        }
+        .status-dot.active {
+            background: #00ff41;
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
+        }
+        #controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        button {
+            background: linear-gradient(135deg, #00ff41 0%, #00d4ff 100%);
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 255, 65, 0.4);
+        }
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        #terminal-container {
+            flex: 1;
+            background: #000;
+            border: 2px solid #00ff41;
+            border-radius: 10px;
+            padding: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0, 255, 65, 0.2);
+        }
+        .xterm-viewport {
+            overflow-y: scroll !important;
+            scrollbar-width: thin;
+            scrollbar-color: #00ff41 #1a1f3a;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>⚛️ QUNIX Quantum Operating System ⚛️</h1>
+        <div id="status">
+            <div class="status-item">
+                <div class="status-dot" id="db-dot"></div>
+                <span id="db-status">Checking database...</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot" id="ws-dot"></div>
+                <span id="ws-status">Disconnected</span>
+            </div>
+        </div>
+        <div id="controls">
+            <button id="btn-connect" onclick="connectTerminal()">Connect Terminal</button>
+            <button id="btn-disconnect" onclick="disconnectTerminal()" disabled>Disconnect</button>
+            <button id="btn-rebuild" onclick="rebuildDatabase()">Rebuild Database</button>
+        </div>
+    </div>
+    <div id="terminal-container"></div>
+
+    <script>
+        const term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            fontFamily: 'Monaco, monospace',
+            theme: {
+                background: '#000000',
+                foreground: '#00ff41',
+                cursor: '#00ff41',
+                selection: 'rgba(0, 255, 65, 0.3)'
+            },
+            cols: 120,
+            rows: 30
+        });
         
-        c.execute(f'''
-            SELECT qid, lid, typ, ar, ai, br, bi, phs, gat, adr, bps
-            FROM {T_PQB}
-            WHERE qid = ?
-        ''', (qid,))
+        const fitAddon = new FitAddon.FitAddon();
+        const webLinksAddon = new WebLinksAddon.WebLinksAddon();
         
-        row = c.fetchone()
+        term.loadAddon(fitAddon);
+        term.loadAddon(webLinksAddon);
+        term.open(document.getElementById('terminal-container'));
+        fitAddon.fit();
         
-        if not row:
-            return jsonify({'success': False, 'error': 'Qubit not found'}), 404
+        let socket = null;
+        const dbDot = document.getElementById('db-dot');
+        const dbStatus = document.getElementById('db-status');
+        const wsDot = document.getElementById('ws-dot');
+        const wsStatus = document.getElementById('ws-status');
+        const btnConnect = document.getElementById('btn-connect');
+        const btnDisconnect = document.getElementById('btn-disconnect');
+        const btnRebuild = document.getElementById('btn-rebuild');
         
-        qid, lid, typ, ar, ai, br, bi, phs, gate, adr, bps = row
-        alpha = complex(ar, ai)
-        beta = complex(br, bi)
-        
-        # Get entanglements
-        c.execute(f'''
-            SELECT qb, typ, str FROM {T_ENT} WHERE qa = ?
-            UNION
-            SELECT qa, typ, str FROM {T_ENT} WHERE qb = ?
-        ''', (qid, qid))
-        
-        entanglements = []
-        for other_qid, ent_type, strength in c.fetchall():
-            entanglements.append({
-                'qubit': other_qid,
-                'type': ent_type,
-                'strength': strength
-            })
-        
-        # Get lattice coordinates
-        c.execute(f'SELECT crd, nrm FROM {T_LAT} WHERE lid = ?', (lid,))
-        lat_row = c.fetchone()
-        
-        coords = None
-        norm = None
-        if lat_row:
-            import zlib
-            crd_blob, norm = lat_row
-            coord_array = np.frombuffer(zlib.decompress(crd_blob), dtype=np.float32)
-            coords = coord_array.tolist()
-        
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'qubit': {
-                'qid': qid,
-                'lid': lid,
-                'type': typ,
-                'alpha': {'real': ar, 'imag': ai},
-                'beta': {'real': br, 'imag': bi},
-                'prob_0': abs(alpha)**2,
-                'prob_1': abs(beta)**2,
-                'phase': phs,
-                'gate': gate,
-                'address': adr,
-                'basis': bps,
-                'entanglements': entanglements,
-                'lattice_coords': coords[:10] if coords else None,  # First 10 dims
-                'lattice_norm': norm
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                if (data.database_exists) {
+                    dbDot.classList.add('active');
+                    dbStatus.textContent = 'Database Ready';
+                } else {
+                    dbDot.classList.remove('active');
+                    dbStatus.textContent = 'Database Missing';
+                }
+            } catch (e) {
+                dbStatus.textContent = 'Status Error';
             }
-        })
+        }
+        
+        async function rebuildDatabase() {
+            if (!confirm('This will rebuild the database. Continue?')) return;
+            
+            btnRebuild.disabled = true;
+            dbStatus.textContent = 'Building...';
+            
+            try {
+                const res = await fetch('/api/build', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('Database built successfully!');
+                    checkStatus();
+                } else {
+                    alert('Build failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Build error: ' + e);
+            } finally {
+                btnRebuild.disabled = false;
+            }
+        }
+        
+        function connectTerminal() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${proto}//${location.host}/ws/terminal`);
+            
+            btnConnect.disabled = true;
+            wsDot.classList.add('active');
+            wsStatus.textContent = 'Connected';
+            
+            socket.onopen = () => {
+                btnDisconnect.disabled = false;
+            };
+            
+            socket.onmessage = (e) => term.write(e.data);
+            
+            socket.onclose = () => {
+                term.writeln('');
+                term.writeln('\\x1b[33m[DISCONNECTED]\\x1b[0m');
+                wsDot.classList.remove('active');
+                wsStatus.textContent = 'Disconnected';
+                btnConnect.disabled = false;
+                btnDisconnect.disabled = true;
+            };
+            
+            term.onData((data) => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+        }
+
+        function disconnectTerminal() {
+            if (socket) socket.close();
+        }
+
+        // Auto-check status on load
+        checkStatus();
+        
+        window.addEventListener('resize', () => fitAddon.fit());
+    </script>
+</body>
+</html>
+"""
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Serve the web terminal interface"""
+    return HTML_TEMPLATE
+
+@app.get("/api/status")
+async def get_status():
+    """Check system status"""
+    db_exists = check_database_valid()
+    db_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/entanglements')
-def api_entanglements():
-    """Get entanglement network"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        limit = int(request.args.get('limit', 500))
-        
-        c.execute(f'''
-            SELECT eid, qa, qb, typ, str, tms
-            FROM {T_ENT}
-            ORDER BY eid DESC
-            LIMIT ?
-        ''', (limit,))
-        
-        entanglements = []
-        for eid, qa, qb, typ, strength, tms in c.fetchall():
-            entanglements.append({
-                'id': eid,
-                'qubit_a': qa,
-                'qubit_b': qb,
-                'type': typ,
-                'strength': strength,
-                'timestamp': tms
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'entanglements': entanglements})
+    # Check kernel status
+    kernel_booted = False
+    if db_exists:
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            c = conn.cursor()
+            c.execute("SELECT val FROM meta WHERE key='kernel_state'")
+            row = c.fetchone()
+            kernel_booted = row and row[0] == 'BOOTED'
+            conn.close()
+        except:
+            pass
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    return {
+        "database_exists": db_exists,
+        "database_size": db_size,
+        "kernel_booted": kernel_booted,
+        "data_dir": str(DATA_DIR),
+        "app_dir": str(APP_DIR)
+    }
 
-
-@app.route('/api/programs')
-def api_programs():
-    """Get compiled programs"""
+@app.post("/api/build")
+async def build_database():
+    """Build/rebuild the QUNIX database"""
     try:
-        conn = get_db()
-        c = conn.cursor()
+        # Remove old database
+        if DB_PATH.exists():
+            DB_PATH.unlink()
         
-        c.execute(f'''
-            SELECT bid, nam, typ, size, loop_enabled, crt
-            FROM {T_BIN}
-            ORDER BY bid
-        ''')
+        # Build new one
+        success = build_database_if_needed()
         
-        programs = []
-        for bid, nam, typ, size, loop_enabled, crt in c.fetchall():
-            programs.append({
-                'bid': bid,
-                'name': nam,
-                'type': typ,
-                'size': size,
-                'loop_enabled': bool(loop_enabled),
-                'created': crt
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'programs': programs})
+        return {
+            "success": success,
+            "database_path": str(DB_PATH)
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.websocket("/ws/terminal")
+async def websocket_terminal(websocket: WebSocket):
+    """WebSocket terminal connection"""
+    await websocket.accept()
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/metaprograms')
-def api_metaprograms():
-    """Get metaprogram status"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        # Get metaprograms
-        c.execute(f'''
-            SELECT bid, nam, typ, size, loop_enabled, crt
-            FROM {T_BIN}
-            WHERE typ = 'metaprogram'
-            ORDER BY bid
-        ''')
-        
-        metaprograms = []
-        for bid, nam, typ, size, loop_enabled, crt in c.fetchall():
-            # Get linked process
-            c.execute(f'''
-                SELECT p.pid, p.sta, l.iteration, l.continue_flag
-                FROM {T_PRC} p
-                JOIN loop_state l ON p.pid = l.pid
-                WHERE l.bid = ?
-            ''', (bid,))
-            
-            proc_row = c.fetchone()
-            
-            if proc_row:
-                pid, status, iteration, cont_flag = proc_row
-            else:
-                pid = None
-                status = 'NOT_LINKED'
-                iteration = 0
-                cont_flag = 0
-            
-            # Get mutation count
-            c.execute('SELECT COUNT(*) FROM mutation_history WHERE source_bid = ?', (bid,))
-            mutation_count = c.fetchone()[0]
-            
-            metaprograms.append({
-                'bid': bid,
-                'name': nam,
-                'type': typ,
-                'size': size,
-                'loop_enabled': bool(loop_enabled),
-                'created': crt,
-                'pid': pid,
-                'status': status,
-                'iteration': iteration,
-                'running': bool(cont_flag),
-                'mutations': mutation_count
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'metaprograms': metaprograms})
+    # Check if database exists
+    if not check_database_valid():
+        await websocket.send_text("\x1b[31m╔══════════════════════════════════════════════════════════════╗\x1b[0m\r\n")
+        await websocket.send_text("\x1b[31m║  ERROR: QUNIX database not found or invalid                  ║\x1b[0m\r\n")
+        await websocket.send_text("\x1b[31m╚══════════════════════════════════════════════════════════════╝\x1b[0m\r\n")
+        await websocket.send_text("\r\n")
+        await websocket.send_text("\x1b[33mClick 'Rebuild Database' button above to build the system.\x1b[0m\r\n")
+        await websocket.send_text("\x1b[33mThis will take 30-60 seconds.\x1b[0m\r\n")
+        await websocket.close()
+        return
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/processes')
-def api_processes():
-    """Get process list"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        c.execute(f'''
-            SELECT pid, nam, sta, pri, crt
-            FROM {T_PRC}
-            ORDER BY pid
-        ''')
-        
-        processes = []
-        for pid, nam, sta, pri, crt in c.fetchall():
-            # Get thread info
-            c.execute(f'''
-                SELECT tid, pc, sp
-                FROM {T_THR}
-                WHERE pid = ?
-            ''', (pid,))
-            
-            threads = []
-            for tid, pc, sp in c.fetchall():
-                threads.append({
-                    'tid': tid,
-                    'pc': pc,
-                    'sp': sp
-                })
-            
-            processes.append({
-                'pid': pid,
-                'name': nam,
-                'status': sta,
-                'priority': pri,
-                'created': crt,
-                'threads': threads
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'processes': processes})
+    # Find dev_cli script
+    dev_cli_script = APP_DIR / "dev_cli.py"
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/measurements')
-def api_measurements():
-    """Get quantum measurements"""
+    if not dev_cli_script.exists():
+        await websocket.send_text(f"\x1b[31mERROR: dev_cli.py not found at {dev_cli_script}\x1b[0m\r\n")
+        await websocket.close()
+        return
+    
+    # Create PTY
+    master_fd, slave_fd = pty.openpty()
+    
+    # Set environment
+    env = os.environ.copy()
+    env['TERM'] = 'xterm-256color'
+    env['PYTHONUNBUFFERED'] = '1'
+    env['RENDER_DISK_PATH'] = str(DATA_DIR)
+    
+    print(f"[TERMINAL] Starting: {dev_cli_script}")
+    print(f"[TERMINAL] Data dir: {DATA_DIR}")
+    
+    # Start dev_cli.py in PTY
+    process = subprocess.Popen(
+        [sys.executable, str(dev_cli_script)],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        preexec_fn=os.setsid,
+        env=env,
+        cwd=str(DATA_DIR)
+    )
+    
+    os.close(slave_fd)
+    
+    session_id = id(websocket)
+    active_sessions[session_id] = {'master_fd': master_fd, 'process': process}
+    
+    async def read_output():
+        """Read from PTY, send to WebSocket"""
+        try:
+            while True:
+                r, _, _ = select.select([master_fd], [], [], 0.1)
+                if r:
+                    try:
+                        data = os.read(master_fd, 4096)
+                        if data:
+                            await websocket.send_text(data.decode('utf-8', errors='replace'))
+                    except OSError:
+                        break
+                
+                if process.poll() is not None:
+                    break
+                
+                await asyncio.sleep(0.01)
+        except:
+            pass
+    
+    async def write_input():
+        """Receive from WebSocket, write to PTY"""
+        try:
+            while True:
+                data = await websocket.receive_text()
+                os.write(master_fd, data.encode())
+        except WebSocketDisconnect:
+            pass
+        except:
+            pass
+    
     try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        limit = int(request.args.get('limit', 100))
-        
-        c.execute(f'''
-            SELECT mid, typ, cnt, tms
-            FROM {T_QMS}
-            ORDER BY mid DESC
-            LIMIT ?
-        ''', (limit,))
-        
-        measurements = []
-        for mid, typ, cnt, tms in c.fetchall():
+        await asyncio.gather(read_output(), write_input())
+    finally:
+        try:
+            process.terminate()
+            process.wait(timeout=2)
+        except:
             try:
-                content = json.loads(cnt)
+                process.kill()
             except:
-                content = cnt
-            
-            measurements.append({
-                'id': mid,
-                'type': typ,
-                'content': content,
-                'timestamp': tms
-            })
+                pass
         
-        conn.close()
+        try:
+            os.close(master_fd)
+        except:
+            pass
         
-        return jsonify({'success': True, 'measurements': measurements})
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+
+if __name__ == "__main__":
+    print("🔮 QUNIX Web Terminal Server")
+    print(f"📁 App: {APP_DIR}")
+    print(f"📁 Data: {DATA_DIR}")
+    print(f"💾 Database: {DB_PATH}")
+    print(f"✓ Database ready: {DB_READY}")
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/kernel_log')
-def api_kernel_log():
-    """Get kernel log entries"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        limit = int(request.args.get('limit', 50))
-        
-        c.execute('''
-            SELECT log_id, timestamp, event_type, details, qubits_involved
-            FROM kernel_log
-            ORDER BY log_id DESC
-            LIMIT ?
-        ''', (limit,))
-        
-        logs = []
-        for log_id, ts, evt, details, qubits in c.fetchall():
-            try:
-                qubit_list = json.loads(qubits) if qubits else []
-            except:
-                qubit_list = []
-            
-            logs.append({
-                'id': log_id,
-                'timestamp': ts,
-                'event_type': evt,
-                'details': details,
-                'qubits': qubit_list
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'logs': logs})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/output_channel')
-def api_output_channel():
-    """Get output channel messages"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        limit = int(request.args.get('limit', 100))
-        
-        c.execute('''
-            SELECT msg_id, timestamp, source, level, message
-            FROM output_channel
-            ORDER BY msg_id DESC
-            LIMIT ?
-        ''', (limit,))
-        
-        messages = []
-        for msg_id, ts, src, lvl, msg in c.fetchall():
-            messages.append({
-                'id': msg_id,
-                'timestamp': ts,
-                'source': src,
-                'level': lvl,
-                'message': msg
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'messages': messages})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/patches')
-def api_patches():
-    """Get patch status"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        c.execute('''
-            SELECT patch_id, target_prog, description, applied, sandbox_tested, tms
-            FROM patches
-            ORDER BY patch_id DESC
-            LIMIT 50
-        ''')
-        
-        patches = []
-        for patch_id, target, desc, applied, tested, tms in c.fetchall():
-            patches.append({
-                'id': patch_id,
-                'target': target,
-                'description': desc,
-                'applied': bool(applied),
-                'tested': bool(tested),
-                'timestamp': tms
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'patches': patches})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/genealogy')
-def api_genealogy():
-    """Get program genealogy (quine evolution)"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        c.execute('''
-            SELECT vid, parent_bid, child_bid, generation, fitness, tms
-            FROM prog_versions
-            ORDER BY generation, vid
-            LIMIT 100
-        ''')
-        
-        versions = []
-        for vid, parent, child, gen, fitness, tms in c.fetchall():
-            versions.append({
-                'id': vid,
-                'parent_bid': parent,
-                'child_bid': child,
-                'generation': gen,
-                'fitness': fitness,
-                'timestamp': tms
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'versions': versions})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/triangles')
-def api_triangles():
-    """Get triangle (W-state quadruple) information"""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        
-        limit = int(request.args.get('limit', 100))
-        
-        c.execute(f'''
-            SELECT tid, v0, v1, v2, v3, fid, crt
-            FROM {T_TRI}
-            ORDER BY tid
-            LIMIT ?
-        ''', (limit,))
-        
-        triangles = []
-        for tid, v0, v1, v2, v3, fid, crt in c.fetchall():
-            triangles.append({
-                'tid': tid,
-                'vertices': [v0, v1, v2, v3],
-                'fidelity': fid,
-                'created': crt
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'triangles': triangles})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════════════
-
-if __name__ == '__main__':
-    if not DB_PATH.exists():
-        print(f"ERROR: Database not found at {DB_PATH}")
-        print("Run qunix-leech-builder.py first to build the system")
-        exit(1)
-    
-    print(f"\n{'='*70}")
-    print(f"QUNIX Web Interface")
-    print(f"{'='*70}")
-    print(f"Database: {DB_PATH}")
-    print(f"Size: {os.path.getsize(DB_PATH) / 1024 / 1024:.2f} MB")
-    print(f"{'='*70}\n")
-    
-    # Get host and port from environment (for Render deployment)
-    host = os.environ.get('HOST', '0.0.0.0')
-    port = int(os.environ.get('PORT', 5000))
-    
-    app.run(host=host, port=port, debug=True)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=7860,
+        log_level="info"
+    )
