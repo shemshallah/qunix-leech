@@ -1253,11 +1253,7 @@ def bootstrap_kernel(conn: sqlite3.Connection):
         (0, 0, "boot", ?, 0, ?, 0, 0, 0, 0, "H", NULL, ?)''',
         (sqrt2_inv, sqrt2_inv, time.time()))
     
-    I can see you're working on a complex QUNIX Leech Lattice Builder system with quantum computing, metaprogramming, and database storage capabilities. This appears to be incomplete - the last line cuts off mid-statement.
-
-Let me help you complete this section and provide guidance on finishing the implementation. Here's the completion of the bootstrap_kernel function and the remaining essential components:
-
-```python
+   
     c.execute(f'''INSERT INTO {T_PQB} VALUES 
         (1, 1, "boot", ?, 0, ?, 0, 0, 1, 1, "CNOT", NULL, ?)''',
         (sqrt2_inv, sqrt2_inv, time.time()))
