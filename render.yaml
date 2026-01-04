@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: qunix-quantum-os
+    env: python
+    region: oregon
+    plan: starter # Free tier, upgrade to standard for better performance
+    
+    # Build command
+    buildCommand: pip install -r requirements.txt
+    
+    # Start command
+    startCommand: python app.py
+    
+    # Environment variables
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: RENDER_DISK_PATH
+        value: /opt/render/project/data
+    
+    # Persistent disk for database
+    disk:
+      name: qunix-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1  # 1GB persistent disk (adjust as needed)
+    
+    # Health check
+    healthCheckPath: /
+    
+    # Auto-deploy
+    autoDeploy: true
