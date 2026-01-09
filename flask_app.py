@@ -477,7 +477,7 @@ def index():
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QUNIX v9.5.1 Terminal</title>
+<title>QUNIX MOONSHINE Terminal</title>
 <link rel="stylesheet" href="/static/css/xterm.css"/>
 <script src="/static/js/xterm.js"></script>
 <script src="/static/js/xterm-addon-fit.js"></script>
@@ -492,7 +492,7 @@ body { background:#000; font-family:monospace; overflow:hidden; color:#fff; }
 </style>
 </head><body>
 <div id="header">
-  <div id="logo">⚛ QUNIX v9.5.1</div>
+  <div id="logo">⚛ QUNIX MOONSHINE</div>
   <div id="status">Status: <span id="status-text">Connecting...</span></div>
 </div>
 <div id="terminal-container"></div>
@@ -504,50 +504,97 @@ body { background:#000; font-family:monospace; overflow:hidden; color:#fff; }
   <span style="margin-left:20px;">QNIC Proxy: localhost:8080</span>
 </div>
 <script>
-const term = new Terminal({ cursorBlink:true, fontFamily:'"Courier New",monospace', fontSize:13, theme:{ background:'#000000', foreground:'#00ff00', cursor:'#ff00ff' }});
+const term = new Terminal({ 
+  cursorBlink:true, 
+  fontFamily:'"Courier New",monospace', 
+  fontSize:13, 
+  theme:{ background:'#000000', foreground:'#00ff00', cursor:'#ff00ff' }
+});
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal-container'));
 fitAddon.fit();
 window.addEventListener('resize', () => fitAddon.fit());
 
-let sessionId = null, lastOutputId = 0, inputBuffer = '', ready = false;
+let sessionId = null;
+let lastOutputId = 0;
+let inputBuffer = '';
+let ready = false;
 let isProcessing = false;
+let pollTimer = null; // FIX: Track the timer
 
 async function startSession() {
   try {
-    const r = await fetch('/api/terminal/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    const r = await fetch('/api/terminal/start', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body:'{}' 
+    });
     const data = await r.json();
-    if (!data.success) { term.write('\\r\\n\\x1b[91mFailed to start\\x1b[0m\\r\\n'); return; }
+    
+    if (!data.success) { 
+      term.write('\\r\\n\\x1b[91mFailed to start\\x1b[0m\\r\\n'); 
+      return; 
+    }
+    
     sessionId = data.session_id;
     document.getElementById('status-text').textContent = 'Online';
     document.getElementById('status-text').style.color = '#0f0';
-    setInterval(poll, 200);
-  } catch (e) { term.write('\\r\\n\\x1b[91mError: ' + e.message + '\\x1b[0m\\r\\n'); }
+    
+    // FIX: Clear any existing timer before starting new one
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    
+    // FIX: Start single polling loop
+    pollTimer = setInterval(poll, 200);
+    
+  } catch (e) { 
+    term.write('\\r\\n\\x1b[91mError: ' + e.message + '\\x1b[0m\\r\\n'); 
+  }
 }
 
 async function poll() {
   if (!sessionId) return;
+  
   try {
     const r = await fetch(`/api/terminal/output/${sessionId}?last_id=${lastOutputId}`);
     const data = await r.json();
+    
     if (data.data && data.data.length > 0) {
       data.data.forEach(item => {
         term.write(item.text);
         if (item.id > lastOutputId) lastOutputId = item.id;
-        if (!ready && item.text.includes('qunix>')) setTimeout(() => { ready = true; term.focus(); }, 100);
+        
+        // FIX: Only set ready once
+        if (!ready && item.text.includes('qunix>')) {
+          ready = true;
+          setTimeout(() => term.focus(), 100);
+        }
       });
     }
-  } catch (e) {}
+  } catch (e) {
+    // Silent failure for network issues
+  }
 }
 
 async function sendInput(data) {
   if (!sessionId || !ready || isProcessing) return;
+  
   isProcessing = true;
+  
   try {
-    await fetch('/api/terminal/input', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_id:sessionId, data:data}) });
-  } catch (e) { term.write('\\r\\n\\x1b[91mError\\x1b[0m\\r\\n'); }
-  isProcessing = false;
+    await fetch('/api/terminal/input', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body:JSON.stringify({session_id:sessionId, data:data}) 
+    });
+  } catch (e) { 
+    term.write('\\r\\n\\x1b[91mError\\x1b[0m\\r\\n'); 
+  } finally {
+    isProcessing = false;
+  }
 }
 
 term.onData(async (data) => {
@@ -561,7 +608,10 @@ term.onData(async (data) => {
     inputBuffer = '';
     await sendInput(cmd);
   } else if (data === '\\x7F' || data === '\\b') {
-    if (inputBuffer.length > 0) { inputBuffer = inputBuffer.slice(0, -1); term.write('\\b \\b'); }
+    if (inputBuffer.length > 0) { 
+      inputBuffer = inputBuffer.slice(0, -1); 
+      term.write('\\b \\b'); 
+    }
   } else if (code === 3) {
     term.write('^C\\r\\n');
     inputBuffer = '';
@@ -572,10 +622,20 @@ term.onData(async (data) => {
   }
 });
 
+// FIX: Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+});
+
+// FIX: Start only once
 startSession();
 term.focus();
 </script>
 </body></html>'''
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # MAIN
