@@ -1,0 +1,754 @@
+QUNIX COMPLETE SCHEMA MAP - UPDATED TO v15.1
+============================================
+Generated: 2026-01-09
+Incorporates: All patches v4 through v15.1
+
+LEGEND:
+  [] = Table name
+  Fields in parentheses without types = column list
+  
+═══════════════════════════════════════════════════════════════════════════
+CORE QUANTUM SUBSTRATE (qunix_leech_builder.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]l (i, c, n, e, j, ji, x, y, s)
+  Leech lattice points (196,560 kissing number)
+  
+[]q (i, l, t, a, b, p, e, j, ji, x, y, m, g, s, entw, etype)
+  Logical qubits mapped to lattice
+  - i: qubit ID
+  - l: lattice point reference
+  - a,b: alpha/beta (amplitude)
+  - p: phase
+  - etype: entanglement type (PRODUCT, BELL, GHZ, W, CUSTOM)
+  
+[]tri (tid, i, v0, v1, v2, v3, w, sv, n, p)
+  Triangulated simplices for Klein bottle topology
+  
+[]e (a, b, t, s)
+  Entanglement pairs
+  - t: type (e=EPR, g=GHZ, w=W-state)
+  
+[]n (a, b, t, s)
+  Node connections
+  
+[]ent (a, b, typ, s)
+  Entanglement registry
+  
+[]b (i, n, c, z)
+  Bus connections
+  
+[]op (o, m, d, a)
+  Operation log
+  
+[]h (n, c, d, u, x)
+  History tracking
+  
+[]ho (o, m, d, a)
+  History operations
+  
+[]terminal_sessions (session_id, status, created, last_activity)
+  Active terminal sessions
+  - last_activity: Added in v11
+  
+[]terminal_input (id, session_id, data, processed, ts)
+  Terminal input buffer
+  
+[]terminal_output (id, session_id, data, ts)
+  Terminal output buffer
+  
+[]rc (s, d, p, c)
+  Routing cache
+  
+[]xen_contexts (pid, program_name, pc, sp, registers, flags, qubit_base, halted, error, cycle_count, created_at)
+  Legacy execution contexts (deprecated, see cpu_execution_contexts)
+  
+[]bus_core (bus_id, bus_name, active, mode, allocated_lattice_points, allocated_triangles, allocated_qubits, packets_processed, circuits_generated, quantum_advantage_ratio, self_mod_count, last_evolution_time, fitness_score)
+  Quantum bus controller
+  - fitness_score: Added in v11
+  - last_updated: Added in v11
+
+═══════════════════════════════════════════════════════════════════════════
+NIC SCHEMA (db_patch_v4.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]nic_core (nic_id, nic_name, running, mode, bind_address, bind_port, lattice_point_id, allocated_qubits, w_state_triangle_id, requests_processed, bytes_sent, bytes_received, cache_hits, cache_misses, quantum_advantage, created_at, last_updated, last_request)
+  Quantum NIC controller
+  
+[]nic_connections (conn_id, client_ip, client_port, server_ip, server_port, epr_pair_id, bell_qubit_a, bell_qubit_b, state, protocol, bytes_sent, bytes_received, requests, established_at, last_activity, timeout_seconds, created_at)
+  Active quantum network connections
+  
+[]nic_request_cache (cache_id, request_hash, request_method, request_url, request_headers, response_status, response_headers, response_body, response_size, amplitude_encoding, phase_encoding, lattice_coords, hit_count, last_hit, expires_at, created_at)
+  HTTP request/response cache with quantum encoding
+  
+[]nic_routing_table (route_id, destination_pattern, destination_port, lattice_path, w_state_chain, epr_bridge, latency_ms, bandwidth_qbps, reliability, use_count, last_used, created_at)
+  Quantum routing table
+  
+[]nic_metrics (metric_id, metric_name, metric_value, metric_unit, timestamp, context)
+  Real-time NIC metrics
+
+═══════════════════════════════════════════════════════════════════════════
+FILESYSTEM SCHEMA (db_patch_v4.py, ls_dir_tree_find_locate.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]fs_superblock (fs_id, fs_name, fs_version, block_size, total_blocks, free_blocks, total_inodes, free_inodes, mounted, mount_point, mount_options, quantum_enabled, lattice_base_point, ecc_enabled, created_at, last_mounted, last_check, external_db_path, external_db_connected)
+  Filesystem superblock
+  
+[]fs_inodes (inode_id, inode_type, mode, uid, gid, size, blocks, nlink, atime, mtime, ctime, crtime, quantum_encoded, lattice_point_id, golay_protected, xattrs, flags)
+  Filesystem inodes
+  - inode_type: f=file, d=directory, l=symlink
+  
+[]fs_dentries (dentry_id, parent_inode, child_inode, name, name_hash, file_type, created_at)
+  Directory entries
+  
+[]fs_blocks (block_id, inode_id, block_index, data, data_size, compressed, compression_algo, original_size, quantum_encoded, qubit_ids, amplitude_data, checksum, golay_parity, created_at, modified_at)
+  Filesystem data blocks
+  
+[]fs_symlinks (link_id, inode_id, target_path, created_at)
+  Symbolic links
+  
+[]fs_cwd (session_id, cwd_inode, cwd_path, updated_at)
+  Current working directory per session
+
+[]fs_external_mounts (mount_id, db_path, linux_path, mount_type, readonly, permissions, automount, enabled, priority, created_at, last_verified)
+  External filesystem mounts (bridge to Linux)
+  - Added in ls_dir_tree_find_locate.py
+  
+[]fs_mount_state (mount_id, active, mount_time, access_count, last_access, error_count, last_error)
+  Mount point status tracking
+  - Added in ls_dir_tree_find_locate.py
+  
+[]fs_special_paths (path, handler_type, handler_function, description, enabled)
+  Special path handlers (e.g., /db, /quantum, /sys)
+  - Added in ls_dir_tree_find_locate.py
+  
+[]fs_locate_index (entry_id, path, filename, basename, extension, source_type, source_mount, inode_id, is_directory, size, mtime, indexed_at)
+  Fast file location index
+  - Added in ls_dir_tree_find_locate.py
+  
+[]fs_locate_meta (meta_key, meta_value, updated_at)
+  Locate index metadata
+  - Added in ls_dir_tree_find_locate.py
+  
+[]fs_path_resolver_cache (path, resolved_type, resolved_target, mount_id, is_directory, cached_at, expires_at, hit_count)
+  Path resolution cache
+  - Added in ls_dir_tree_find_locate.py
+
+═══════════════════════════════════════════════════════════════════════════
+TRANSLATION CHAIN (db_patch_v5.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]lp (i, x, y, z, norm, coords, allocated, allocated_to, created_at)
+  Lattice points for quantum computation
+  
+[]python_to_qasm_translation (translation_id, cmd_name, python_function, python_ast, qasm_template, parameter_mapping, qubit_allocation_strategy, optimization_level, created_at)
+  Python → QASM translation layer
+  
+[]qasm_to_binary_compilation (compilation_id, circuit_id, qasm_code, qasm_hash, binary_bytecode, binary_size, opcode_sequence, register_allocation, stack_depth, compilation_time_ms, optimization_applied, created_at)
+  QASM → Binary compilation
+  
+[]binary_to_opcode_mapping (mapping_id, binary_offset, opcode, operand_bytes, operand_count, operand_types, cpu_cycles, quantum_gates_triggered, qubit_ids, created_at)
+  Binary → Opcode mapping
+  
+[]execution_chain_history (chain_id, cmd_name, python_source, qasm_code, binary_bytecode, opcodes_executed, qubits_allocated, execution_result, quantum_advantage_measured, execution_time_ms, compilation_time_ms, total_time_ms, success, error_message, timestamp)
+  Complete execution chain history
+  
+[]circuit_optimization_cache (cache_id, original_qasm, original_hash, optimized_qasm, optimization_strategy, gates_before, gates_after, depth_before, depth_after, gate_reduction_percent, fidelity_preserved, optimization_time_ms, times_reused, created_at, last_used)
+  Circuit optimization cache
+
+═══════════════════════════════════════════════════════════════════════════
+CPU TABLES (db_patch_v6.py, db_patch_cpu_1.py, ls_dir_tree_find_locate.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]cpu_instruction_formats (format_id, format_name, opcode_length, operand_count, operand_sizes, total_bytes, byte_layout, endianness, description, examples)
+  CPU instruction format definitions
+  
+[]cpu_binary_cache (binary_hash, instruction_bytes, opcode_id, operands, parsed_at, hit_count)
+  Binary instruction cache
+  
+[]cpu_opcode_aliases (alias_id, alias_mnemonic, canonical_opcode, description)
+  Opcode aliases
+  
+[]cpu_microcode_sequences (sequence_id, opcode, sequence_order, micro_opcode, micro_operands, conditional, description)
+  Microcode translation sequences
+  - description: Added in ls_dir_tree_find_locate.py
+  
+[]cpu_micro_primitives (primitive_id, primitive_name, operation_type, qiskit_method, parameters, cycles, description)
+  Microcode primitive operations
+  - parameters, description: Added in ls_dir_tree_find_locate.py
+  
+[]cpu_qiskit_circuits (circuit_id, circuit_name, description, num_qubits, num_clbits, num_gates, circuit_depth, qasm_code, qiskit_json, optimized_qasm, success_rate, avg_execution_time_ms, tags, created_at)
+  Qiskit circuit library (deprecated, merged into quantum_command_circuits in v11)
+  
+[]cpu_qiskit_backends (backend_id, backend_name, backend_type, provider, num_qubits, coupling_map, basis_gates, configuration, is_available, priority, last_used, created_at)
+  Available Qiskit backends
+  
+[]cpu_circuit_cache (cache_id, circuit_hash, circuit_id, backend_id, input_state, execution_result, execution_time_ms, shots, success, hit_count, last_hit, created_at)
+  Circuit execution cache
+  
+[]cpu_measurement_results (measurement_id, state_id, execution_id, measured_qubits, measurement_basis, outcome_bitstring, outcome_counts, probability, timestamp)
+  Quantum measurement results
+  - Consolidated in ls_dir_tree_find_locate.py
+  
+[]cpu_optimizer_rules (rule_id, rule_name, rule_type, pattern, replacement, gate_reduction, depth_reduction, applies_to_backends, priority, enabled, description)
+  Circuit optimization rules
+  
+[]cpu_optimization_log (opt_id, circuit_id, rule_id, gates_before, gates_after, depth_before, depth_after, optimization_time_ms, applied_at)
+  Optimization application log
+  
+[]cpu_error_correction_codes (ecc_id, code_name, code_type, logical_qubits, physical_qubits, distance, syndrome_circuit_id, recovery_circuit_id, encoding_overhead, error_threshold, description)
+  Error correction code definitions
+  
+[]cpu_ecc_log (ecc_log_id, pid, ecc_id, logical_qubit, physical_qubits, syndrome_measured, errors_detected, errors_corrected, correction_success, timestamp)
+  Error correction application log
+  
+[]cpu_opcodes (opcode, mnemonic, category, subcategory, description, operand_count, operand_types, operand_constraints, cycles_min, cycles_max, qasm_template, hardware_impl, composition_deps, flags_affected, complexity_class, is_quantum, is_composite, requires_ecc, lattice_operation, created_at)
+  CPU opcode definitions
+  - lattice_operation, complexity_class: Added in ls_dir_tree_find_locate.py
+  
+[]cpu_quantum_states (state_id, qubit_ids, state_vector, density_matrix, purity, fidelity, entanglement_entropy, created_at, expires_at)
+  Quantum state storage
+  
+[]cpu_qubit_allocator (qubit_id, allocated, allocated_to_pid, allocated_to_cmd, usage_count, last_allocated, last_freed, t1_us, t2_us, error_rate, last_calibration, allocation_time, last_used, current_state_id)
+  Qubit allocation tracking
+  - allocation_time, last_used: Added in ls_dir_tree_find_locate.py
+  - allocated_to_cmd, t1_us, t2_us, error_rate, last_calibration, last_freed: Added in v11
+  - current_state_id: Added in ls_dir_tree_find_locate.py
+  
+[]cpu_execution_contexts (pid, program_name, pc, sp, registers, flags, qubit_base, halted, error, cycle_count, created_at, exec_state)
+  CPU execution contexts
+  - exec_state: Added in v11
+  
+[]cpu_execution_log (log_id, pid, cmd_name, opcode, operands, cycle_number, pc_before, pc_after, execution_time_ns, execution_time_ms, timestamp)
+  CPU execution log (unified in v11)
+
+[]cpu_execution_profile (profile_id, context_name, total_executions, total_time_ms, avg_time_ms, min_time_ms, max_time_ms, success_rate, last_execution, created_at)
+  Execution profiling data
+  
+[]cpu_system_metrics (metric_id, metric_name, metric_value, metric_unit, component, timestamp)
+  System-wide metrics
+  
+[]cpu_resource_usage (usage_id, resource_type, total_available, currently_used, peak_usage, timestamp)
+  Resource usage tracking
+  
+[]cpu_execution_flow (flow_id, parent_flow_id, opcode, start_time, end_time, status, context_data)
+  Execution flow tree
+  
+[]cpu_system_config (config_key, config_value, config_type, description, updated_at)
+  System configuration
+  
+[]cpu_physical_constants (constant_name, constant_value, unit, description)
+  Physical constants database
+  
+[]cpu_maintenance_jobs (job_id, job_type, status, scheduled_at, started_at, completed_at, result)
+  Maintenance job tracking
+
+═══════════════════════════════════════════════════════════════════════════
+DISTRIBUTED COMPUTING (db_patch_cpu_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]dist_nodes (node_id, node_name, address, public_key, leech_capacity, epr_capacity, golay_implementation, status, latency_ms, last_ping, created_at)
+  Distributed quantum nodes
+  
+[]dist_shared_epr (pair_id, node_a, node_b, qubit_a, qubit_b, fidelity, created_at, expires_at)
+  Shared EPR pairs between nodes
+  
+[]dist_teleport_log (teleport_id, source_node, dest_node, qubit_id, success, fidelity, latency_ms, timestamp)
+  Quantum teleportation log
+  
+[]dist_remote_opcodes (remote_id, source_node, dest_node, opcode, operands, status, result, submitted_at, completed_at)
+  Remote opcode execution
+
+═══════════════════════════════════════════════════════════════════════════
+QSH - Quantum Shell (db_patch_cpu_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]qsh_sessions (session_id, user_id, node_id, quantum_auth_token, classical_auth_token, created_at, expires_at, last_activity)
+  QSH session management
+  
+[]qsh_command_history (history_id, session_id, command, result, quantum_state_hash, timestamp)
+  QSH command history
+  
+[]qsh_quantum_auth (auth_id, user_id, public_key_hash, entangled_qubit_ids, created_at)
+  Quantum authentication
+
+═══════════════════════════════════════════════════════════════════════════
+ALGORITHM LIBRARY (db_patch_cpu_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]cpu_algorithm_library (algo_id, algo_name, algo_type, description, complexity_classical, complexity_quantum, speedup_type, min_qubits, optimal_qubits, implementation_status, created_at)
+  Quantum algorithm definitions
+  
+[]cpu_algorithm_implementations (impl_id, algo_id, impl_name, qasm_code, optimized_for, success_rate, avg_time_ms, created_at)
+  Algorithm implementations
+  
+[]cpu_algorithm_results (result_id, algo_id, impl_id, input_data, output_data, qubits_used, execution_time_ms, classical_time_estimate_ms, quantum_advantage, success, timestamp)
+  Algorithm execution results
+
+═══════════════════════════════════════════════════════════════════════════
+PROFILING (db_patch_cpu_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+Note: cpu_execution_profile, cpu_system_metrics, cpu_resource_usage, 
+cpu_execution_flow, cpu_system_config, cpu_physical_constants, 
+cpu_maintenance_jobs are listed above in CPU TABLES section.
+
+═══════════════════════════════════════════════════════════════════════════
+COMMAND SYSTEM (db_patch_v7.py, db_patch_v8.py, db_patch_cmd_1.py, 
+                db_patch_v9.py, db_patch_v10.py, db_patch_v11.py, db_patch_v12.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]command_registry (cmd_id, cmd_name, cmd_opcode, cmd_category, cmd_description, cmd_usage, cmd_implementation, cmd_qiskit_circuit, cmd_requires_qubits, cmd_quantum_advantage, cmd_created_at, cmd_last_used, cmd_use_count, cmd_enabled, gate_name)
+  Core command registry
+  - CONSOLIDATED in v12: Unified schema, removed cmd_id FK conflicts
+  - gate_name: Added in v11, v14, v15
+  
+[]command_flags (flag_id, cmd_id, flag_short, flag_long, flag_bit, flag_type, value_type, default_value, flag_description, flag_example, flag_opcode_modifier, flag_group, mutually_exclusive, enabled, created_at)
+  Command flag definitions
+  - DROPPED in v11 (FK conflicts), restored in v12 with cmd_name reference
+  - Added in v7, v9
+  
+[]command_arguments (arg_id, cmd_id, arg_position, arg_name, arg_type, required, default_value, validation_regex, validation_min, validation_max, validation_enum, arg_description, arg_example, transform_func, created_at)
+  Command argument definitions
+  - DROPPED in v11 (FK conflicts), restored in v12 with cmd_name reference
+  - Added in v7, v9
+  
+[]command_handlers (handler_id, cmd_id, handler_type, qasm_code, sql_query, python_code, method_name, builtin_name, shell_command, context_map, result_formatter, error_formatter, priority, timeout_seconds, retry_count, requires_qubits, qubit_count, enabled, created_at, updated_at, last_executed, execution_count, success_count, error_count, avg_execution_ms)
+  Command handler implementations
+  - CONSOLIDATED in v11/v12: Changed to use cmd_name instead of cmd_id
+  - Added in v7, enhanced in v8, v9, v10
+  - handler_type: QUANTUM_CIRCUIT, SQL_QUERY, PYTHON_METHOD, BUILTIN, 
+                  FILESYSTEM, NETWORK, TEXT_PROCESSOR, ARCHIVE, SYSTEM, 
+                  ALIAS, COMPOSITE, EXTERNAL
+  
+[]handler_dependencies (dep_id, handler_id, depends_on_handler_id, execution_order, pass_output, condition)
+  Handler dependency chain
+  - DROPPED in v11 (references non-existent handler_id)
+  - Added in v7
+  
+[]command_aliases (alias_id, alias_name, target_cmd_id, alias_args, enabled, created_at)
+  Command aliases
+  - CHANGED in v11: target_cmd_id → canonical_cmd_name
+  - Added in v7
+  
+[]command_execution_log (log_id, exec_id, session_id, cmd_id, cmd_name, cmd_line, handler_id, handler_type, parsed_args, parsed_flags, context_data, result_data, error_message, execution_time_ms, qubit_ids, quantum_advantage, success, timestamp, arguments, qubits_allocated, quantum_time_ms, classical_time_ms, return_value, pid, cmd_opcode)
+  Command execution history
+  - MAJOR CHANGES in v11/v12: Removed broken cmd_id FK, added exec_id
+  - quantum_command_results now references exec_id (was exec_id)
+  - Added in v7, consolidated in v11
+  
+[]command_parameters (param_id, cmd_id, cmd_name, param_name, param_type, param_required, param_description)
+  Command parameter definitions
+  - CHANGED in v11: Added cmd_name, FK to cmd_name instead of cmd_id
+  - Added in v8
+  
+[]command_performance_stats (stat_id, cmd_name, execution_count, total_time_ms, avg_time_ms, min_time_ms, max_time_ms, success_count, error_count, quantum_executions, classical_executions, last_executed)
+  Command performance statistics
+  - CHANGED in v11: Uses cmd_name instead of cmd_id
+  - Added in v7, v8
+  
+[]command_cache (cache_id, cmd_hash, cmd_name, arguments_hash, result, qubit_state, hit_count, last_hit, created_at, expires_at)
+  Command result cache
+  - Added in v8
+  
+[]command_categories (category_id, category_name, category_opcode_base, command_count, quantum_command_count, description)
+  Command category definitions
+  - Added in v8
+  
+[]quantum_circuit_templates (template_id, template_name, template_category, num_qubits, num_params, parameter_names, parameter_defaults, qasm_template, description, complexity_class, created_at)
+  Reusable circuit templates
+  - DROPPED in v11 (duplicate of quantum_command_circuits)
+  - Added in v8
+  
+[]system_python_modules (module_id, module_name, module_code, module_version, dependencies, description, created_at, updated_at)
+  Python module library
+  - DROPPED in v11 (standalone, unused)
+  - Added in v8
+
+[]command_binary_cache (cache_id, cmd_id, flags_bitfield, args_hash, binary_code, qasm_compiled, circuit_depth, gate_count, created_at, last_used, use_count)
+  Binary command cache
+  - DROPPED in v11 (references cmd_id)
+  - Added in v7
+
+[]handler_execution_stats (stat_id, handler_id, execution_time_ms, memory_used_bytes, qubits_used, success, error_message, timestamp)
+  Handler execution statistics
+  - Added in v7
+
+[]cpu_command_mapping (mapping_id, cmd_name, cpu_opcode, microcode_sequence, quantum_circuit_id, execution_priority, created_at)
+  Command to CPU opcode mapping
+  - Added in db_patch_cmd_1.py
+
+═══════════════════════════════════════════════════════════════════════════
+QUANTUM COMMAND CIRCUITS (db_patch_v5.py, db_patch_cmd_1.py, 
+                          ls_dir_tree_find_locate.py, db_patch_v11.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]quantum_command_circuits (circuit_id, cmd_name, circuit_name, num_qubits, num_clbits, qasm_code, qiskit_json, optimization_level, avg_fidelity, execution_time_ms, created_at, gate_sequence, complexity_score, avg_execution_time_ms, tags, last_used, use_count)
+  Quantum circuit definitions
+  - CONSOLIDATED in v11: Merged cpu_qiskit_circuits into this table
+  - gate_sequence: Added in ls_dir_tree_find_locate.py, v11
+  - Added in v5, enhanced in v11
+  
+[]quantum_command_results (result_id, exec_id, exec_log_id, circuit_id, qubits_used, measurement_results, state_vector, density_matrix, fidelity, shots, backend_name, timestamp)
+  Quantum execution results
+  - FIXED in v11: Changed exec_id → exec_log_id to reference command_execution_log
+  - Added in v5
+
+═══════════════════════════════════════════════════════════════════════════
+HELP SYSTEM (db_patch_cmd_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]help_system (help_id, cmd_name, short_description, long_description, syntax, examples, options, parameters, return_values, error_codes, related_commands, see_also, quantum_aspects, notes, created_at, updated_at)
+  Comprehensive help system
+  
+[]help_examples (example_id, cmd_name, example_command, example_output, description, created_at)
+  Command usage examples
+
+═══════════════════════════════════════════════════════════════════════════
+QUANTUM STORAGE (db_patch_cmd_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]quantum_storage_manifolds (manifold_id, manifold_name, manifold_type, dimension, curvature, lattice_points, storage_capacity_qubits, description, created_at)
+  Quantum storage manifold definitions
+
+═══════════════════════════════════════════════════════════════════════════
+QNIC TRAFFIC (db_patch_qnic_1.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]qnic_traffic_log (request_id, timestamp, client_ip, client_port, method, url, host, path, headers_json, quantum_route_json, lattice_points_used, epr_pairs_used, triangles_used, routing_strategy, routing_cost_sigma, response_status, response_size, response_headers_json, latency_ms, quantum_latency_ms, classical_latency_estimate_ms, quantum_advantage, proof_hash, proof_signature, merkle_root, verified, created_at)
+  QNIC traffic log with quantum routing proof
+  
+[]qnic_metrics_realtime (metric_name, metric_value, metric_unit, last_updated)
+  Real-time QNIC metrics
+  
+[]qnic_domain_stats (domain, request_count, bytes_sent, bytes_received, avg_latency_ms, quantum_routes_used, last_request, created_at)
+  Per-domain statistics
+  
+[]qnic_active_connections (conn_id, client_ip, client_port, dest_host, dest_port, state, quantum_path, bytes_sent, bytes_received, established_at, last_activity)
+  Active QNIC connections
+
+═══════════════════════════════════════════════════════════════════════════
+BUS ROUTING (ls_dir_tree_find_locate.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]bus_routing (route_id, ip_address, port, endpoint_hash, packets_routed, last_used, created_at)
+  Bus routing table
+  
+[]bus_klein_topology (topology_id, classical_x, classical_y, classical_z, lattice_point_id, lattice_coords, twist_angle, mobius_flip, traversals, created_at)
+  Klein bottle topology mapping
+
+═══════════════════════════════════════════════════════════════════════════
+META SYSTEM (db_patch_v4.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[]meta_system_linkages (linkage_id, source_system, target_system, linkage_type, description, created_at)
+  Inter-system linkages
+
+═══════════════════════════════════════════════════════════════════════════
+VIEWS (ls_dir_tree_find_locate.py, db_patch_v11.py, db_patch_v12.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[VIEW] v_commands
+  Active commands with circuit info
+  SELECT: cmd_name, cmd_category, cmd_description, cmd_requires_qubits,
+          circuit_qubits, opcode_mnemonic, opcode_category
+  - Added in ls_dir_tree_find_locate.py
+
+[VIEW] v_qubit_status
+  Qubit allocation status summary
+  SELECT: free_qubits, allocated_qubits, total_qubits, triangles, epr_pairs
+  - Added in ls_dir_tree_find_locate.py
+
+[VIEW] v_fs_tree
+  Filesystem tree view
+  SELECT: parent_inode, child_inode, name, inode_type, size, mode
+  - Added in ls_dir_tree_find_locate.py
+
+[VIEW] v_active_mounts
+  Active filesystem mounts
+  SELECT: mount_id, db_path, linux_path, mount_type, readonly, active, access_count
+  - Added in ls_dir_tree_find_locate.py
+
+[VIEW] v_execution_chain
+  Complete execution chain (command → opcode → microcode → circuit)
+  SELECT: cmd_name, opcode, mnemonic, sequence_order, primitive_name, 
+          qiskit_method, qasm_code
+  - Added in ls_dir_tree_find_locate.py
+
+[VIEW] v_command_stats
+  Command performance statistics
+  SELECT: cmd_name, cmd_category, cmd_use_count, execution_count, avg_time_ms,
+          success_count, error_count, quantum_executions, classical_executions
+  - UPDATED in v11: Uses cmd_name instead of cmd_id
+  - Added in v11
+
+[VIEW] v_execution_chain_complete
+  Enhanced execution chain view
+  SELECT: cmd_name, cmd_category, gate_name, has_qasm, num_qubits, gate_sequence
+  - UPDATED in v11: Uses cmd_name
+  - Added in v11
+
+[VIEW] v_all_commands
+  All enabled commands
+  SELECT: cmd_name, cmd_category, cmd_description, cmd_requires_qubits, cmd_use_count
+  - Added in v12
+
+═══════════════════════════════════════════════════════════════════════════
+TRIGGERS (ls_dir_tree_find_locate.py)
+═══════════════════════════════════════════════════════════════════════════
+
+[TRIGGER] tr_update_cmd_stats
+  Auto-update command_performance_stats on command_execution_log INSERT
+  - Added in ls_dir_tree_find_locate.py
+
+[TRIGGER] tr_qubit_alloc_time
+  Auto-update allocation_time on cpu_qubit_allocator UPDATE
+  - Added in ls_dir_tree_find_locate.py
+
+[TRIGGER] tr_fs_mtime_update
+  Auto-update fs_inodes.mtime on fs_blocks UPDATE
+  - Added in ls_dir_tree_find_locate.py
+
+[TRIGGER] tr_mount_access
+  Auto-update fs_mount_state access stats
+  - Added in ls_dir_tree_find_locate.py
+
+[TRIGGER] tr_expire_path_cache
+  Auto-expire fs_path_resolver_cache entries
+  - Added in ls_dir_tree_find_locate.py
+
+═══════════════════════════════════════════════════════════════════════════
+INDICES
+═══════════════════════════════════════════════════════════════════════════
+
+CPU INDICES:
+  idx_cpu_opcodes_mnemonic ON cpu_opcodes(mnemonic)
+  idx_cpu_opcodes_category ON cpu_opcodes(category)
+  idx_cmd_registry_name ON command_registry(cmd_name)
+  idx_cmd_registry_opcode ON command_registry(cmd_opcode)
+  idx_cmd_registry_category ON command_registry(cmd_category)
+  idx_qubit_alloc_allocated ON cpu_qubit_allocator(allocated)
+  idx_qubit_alloc_status ON cpu_qubit_allocator(allocated)
+  idx_qubit_alloc_pid ON cpu_qubit_allocator(allocated_to_pid)
+  idx_microcode_opcode ON cpu_microcode_sequences(opcode)
+  idx_qcircuits_cmd ON quantum_command_circuits(cmd_name)
+  idx_qcc_cmd ON quantum_command_circuits(cmd_name)
+  idx_qcc_name ON quantum_command_circuits(circuit_name)
+  idx_qcc_qubits ON quantum_command_circuits(num_qubits)
+
+FILESYSTEM INDICES:
+  idx_fs_dentries_parent ON fs_dentries(parent_inode)
+  idx_fs_dentries_name ON fs_dentries(name)
+  idx_fs_blocks_inode ON fs_blocks(inode_id)
+  idx_fs_mounts_path ON fs_external_mounts(db_path)
+  idx_fs_locate_basename ON fs_locate_index(basename)
+  idx_fs_locate_path ON fs_locate_index(path)
+
+EXECUTION INDICES:
+  idx_exec_log_cmd ON command_execution_log(cmd_name)
+  idx_exec_log_time ON command_execution_log(timestamp)
+  idx_exec_log_session ON command_execution_log(session_id)
+  idx_exec_log_pid ON cpu_execution_log(pid)
+  idx_measurement_ts ON cpu_measurement_results(timestamp)
+  idx_perf_stats_name ON command_performance_stats(cmd_name)
+  idx_cmd_perf_stats ON command_performance_stats(cmd_name)
+
+COMMAND SYSTEM INDICES:
+  idx_flags_cmd ON command_flags(cmd_id)
+  idx_flags_short ON command_flags(flag_short)
+  idx_flags_long ON command_flags(flag_long)
+  idx_flags_enabled ON command_flags(enabled)
+  idx_args_cmd ON command_arguments(cmd_id)
+  idx_args_position ON command_arguments(cmd_id, arg_position)
+  idx_handlers_cmd ON command_handlers(cmd_id)
+  idx_handlers_type ON command_handlers(handler_type)
+  idx_handlers_priority ON command_handlers(cmd_id, priority DESC)
+  idx_handlers_enabled ON command_handlers(enabled)
+  idx_cmd_handler_name ON command_handlers(cmd_name)
+  idx_cmd_handler_type ON command_handlers(handler_type)
+  idx_aliases_name ON command_aliases(alias_name)
+  idx_aliases_target ON command_aliases(target_cmd_id)
+  idx_binary_cache_lookup ON command_binary_cache(cmd_id, flags_bitfield, args_hash)
+  idx_modules_name ON system_python_modules(module_name)
+  idx_circuit_templates_name ON quantum_circuit_templates(template_name)
+  idx_circuit_templates_cat ON quantum_circuit_templates(template_category)
+  idx_cmd_params ON command_parameters(cmd_name)
+  idx_qcr_exec ON quantum_command_results(exec_log_id)
+  idx_qcr_circuit ON quantum_command_results(circuit_id)
+  idx_handler_stats ON handler_execution_stats(handler_id, timestamp)
+
+═══════════════════════════════════════════════════════════════════════════
+SCHEMA EVOLUTION NOTES
+═══════════════════════════════════════════════════════════════════════════
+
+v4 (db_patch_v4.py):
+  - Initial NIC, filesystem, meta system
+  - Base tables for quantum networking
+
+v5 (db_patch_v5.py):
+  - Translation chain (Python → QASM → Binary)
+  - Quantum command circuits
+  - Circuit optimization cache
+
+v6 (db_patch_v6.py):
+  - CPU instruction formats
+  - Binary cache
+  - Opcode aliases
+
+v7 (db_patch_v7.py, v7_fix_all_tables.py, v7_fix_handlers_table.py):
+  - Command registry expansion
+  - Command flags and arguments
+  - Handler system (with cmd_id FK issues)
+  - FIXED: Dropped and recreated tables with proper schema
+
+v8 (db_patch_v8.py):
+  - Command categories
+  - Command cache
+  - Circuit templates
+  - Python modules
+
+v9 (db_patch_v9.py):
+  - 51 additional commands (archive, builtin, filesystem, utility, 
+    network, process, text, quantum gates, quantum ops, lattice)
+  - Extensive flag and argument definitions
+  - Handler implementations for new commands
+
+v10 (db_patch_v10.py, v10_db_analyze.py):
+  - 30 missing command handlers
+  - Diagnostic analysis tools
+  - Handler gap filling
+
+v11 (db_patch_v11.py, db_patch_v11.2.py):
+  - MAJOR CONSOLIDATION: Fixed all FK conflicts
+  - Changed command_execution_log to remove broken cmd_id FK
+  - Changed command_parameters to use cmd_name instead of cmd_id
+  - Dropped handler_dependencies (broken FK)
+  - Consolidated quantum_command_circuits (merged cpu_qiskit_circuits)
+  - Fixed command_handlers to use cmd_name
+  - Dropped conflicting tables from v7: command_flags, command_arguments,
+    command_binary_cache, system_python_modules, quantum_circuit_templates
+  - Updated all views to use cmd_name
+  - Fixed quantum_command_results FK (exec_id → exec_log_id)
+
+v12 (db_patch_v12.py):
+  - NUCLEAR OPTION: Complete rebuild
+  - Dropped ALL command-related tables
+  - Rebuilt with unified, consistent schema
+  - Restored critical data
+  - Simplified FK relationships
+  - Restored essential commands and circuits
+
+v13 (db_patch_13.py):
+  - Qubit allocator population from q table
+  - Fixed qubit type (etype) handling
+  - Allocation verification
+
+v14 (db_patch_v14.py, db_patch_v14.2.py):
+  - Auto-fix for all 196,560 qubits
+  - NULL etype correction
+  - Allocator repopulation
+  - Distribution analysis tools
+
+v15 (db_v15_gate_name.py):
+  - Added missing gate_name column to command_registry
+  - Added cmd_description, cmd_requires_qubits, cmd_enabled columns
+  - Created essential tables if missing:
+    * command_handlers
+    * quantum_command_circuits
+    * cpu_qubit_allocator
+
+v15.1 (db_v15.1_schema_fix.py):
+  - Comprehensive schema reconciliation
+  - Added cmd_requires_qubits as CANONICAL column name
+  - Recursive table scanning
+  - Qubit-related schema item detection
+  - Command registry variation analysis
+  - DB executor expectation checking
+  - Unified schema creation
+  - Handler table fixes (requires_qubits, qubit_count)
+  - Essential table creation (quantum_command_circuits, cpu_qubit_allocator)
+  - Qubit allocator population from q table
+  - Full query verification
+
+ls_dir_tree_find_locate.py:
+  - Complete execution infrastructure
+  - Filesystem special paths
+  - Locate index for fast search
+  - Path resolution cache
+  - Bus routing and Klein topology
+  - Views for system status
+  - Triggers for automatic maintenance
+  - Essential circuit QASM templates
+  - Microcode primitive definitions
+  - Opcode to microcode mapping
+
+═══════════════════════════════════════════════════════════════════════════
+CURRENT STATE (v15.1)
+═══════════════════════════════════════════════════════════════════════════
+
+CANONICAL COLUMN NAMES:
+  - command_registry.cmd_requires_qubits (NOT requires_qubits)
+  - command_handlers.requires_qubits (handler-level requirement)
+  - command_handlers.qubit_count (specific count needed)
+
+FOREIGN KEY STRATEGY:
+  - NO cmd_id foreign keys (causes conflicts across patches)
+  - Use cmd_name for cross-table references
+  - Soft references preferred over hard FKs
+
+QUBIT ALLOCATION:
+  - cpu_qubit_allocator populated from q table
+  - All 196,560 qubits tracked
+  - etype field required (PRODUCT, BELL, GHZ, W, CUSTOM)
+
+EXECUTION CHAIN:
+  Terminal → command_registry → cpu_opcodes → cpu_microcode_sequences →
+  cpu_micro_primitives → quantum_command_circuits → QASM → Qiskit →
+  cpu_measurement_results → q table state update
+
+TABLE COUNT: 100+ tables
+QUBIT COUNT: 196,560 (Leech lattice kissing number)
+COMMAND COUNT: 150+ commands (as of v9)
+CIRCUIT COUNT: 15+ quantum circuits
+OPCODE COUNT: 30+ CPU opcodes
+
+═══════════════════════════════════════════════════════════════════════════
+DEPRECATED TABLES (removed in consolidation)
+═══════════════════════════════════════════════════════════════════════════
+
+The following tables were removed during consolidation patches:
+  - xen_contexts (replaced by cpu_execution_contexts)
+  - cpu_qiskit_circuits (merged into quantum_command_circuits)
+  - handler_dependencies (broken FK, no replacement)
+  - quantum_circuit_templates (duplicate of quantum_command_circuits)
+  - system_python_modules (standalone, unused)
+  - command_binary_cache (referenced cmd_id, removed in v11)
+
+Some tables were temporarily dropped and restored in v12:
+  - command_flags (restored with cmd_name reference)
+  - command_arguments (restored with cmd_name reference)
+
+═══════════════════════════════════════════════════════════════════════════
+RECOMMENDED QUERY PATTERNS
+═══════════════════════════════════════════════════════════════════════════
+
+Get command with circuit:
+  SELECT cr.cmd_name, cr.cmd_category, qcc.qasm_code, qcc.num_qubits
+  FROM command_registry cr
+  LEFT JOIN quantum_command_circuits qcc ON cr.cmd_name = qcc.cmd_name
+  WHERE cr.cmd_name = 'qh';
+
+Get free qubits:
+  SELECT qubit_id FROM cpu_qubit_allocator 
+  WHERE allocated = 0 
+  LIMIT 10;
+
+Get execution chain:
+  SELECT * FROM v_execution_chain WHERE cmd_name = 'qh';
+
+Get command stats:
+  SELECT * FROM v_command_stats WHERE cmd_name = 'qh';
+
+═══════════════════════════════════════════════════════════════════════════
+END OF SCHEMA MAP
+═══════════════════════════════════════════════════════════════════════════
