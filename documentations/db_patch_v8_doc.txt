@@ -1,3 +1,0 @@
-, chgrp chmod, chown, cp, dir, du, file ln, mv, rmdir, stat, umask, bc cal, expr, false, locate, sleep, test true, whereis, yes, curl, dig, ftp ifconfig, ip, netstat, nslookup, ping, route scp, ss, ssh, telnet, traceroute, wget qbarrier, qccnot, qcswap, qcy, qiswap, qphase qrx, qry, qrz, entangle, grover, iqft qft, qinit, qstate, teleport, vqe, binary bus_recv, bus_send, bus_status, circuit_run, circuit_save, e8_split epr_pair, golay_decode, golay_encode, hyperbolic, lattice_point, leech_decode leech_encode, moonshine, opcode, qnic_connect, qnic_listen, qnic_status triangle, bg, export, fg, jobs, kill killall, nice, renice, time, top, w awk, cut, diff, less, more, paste patch, sed, sort, tr, uniq
-
-
