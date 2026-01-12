@@ -1,0 +1,2648 @@
+# QUNIX DATABASE v16 - COMPLETE SCHEMA DEPENDENCY TREE
+**Generated:** 2026-01-11  
+**Version:** 16.0 (Post-consolidation)  
+**Total Tables:** 120+  
+**Total Views:** 12  
+**Total Triggers:** 15+  
+
+---
+
+## TABLE OF CONTENTS
+1. [Core Quantum Substrate](#core-quantum-substrate)
+2. [Golay Error Correction](#golay-error-correction)
+3. [Quantum Networking (NIC)](#quantum-networking-nic)
+4. [Filesystem](#filesystem)
+5. [CPU & Execution](#cpu--execution)
+6. [Command System](#command-system)
+7. [Quantum Circuits](#quantum-circuits)
+8. [Process Management](#process-management)
+9. [Terminal I/O](#terminal-io)
+10. [Network Stack](#network-stack)
+11. [Security & Auth](#security--auth)
+12. [IPC Mechanisms](#ipc-mechanisms)
+13. [System Monitoring](#system-monitoring)
+14. [Views](#views)
+15. [Triggers](#triggers)
+16. [Dependency Map](#dependency-map)
+
+---
+
+## CORE QUANTUM SUBSTRATE
+
+### leech_lattice (l)
+**Purpose:** 196,560 Leech lattice minimal vectors  
+**Dependencies:** None (foundational)  
+**Columns:**
+- `point_id` INTEGER PRIMARY KEY
+- `coords_24d` BLOB (compressed 24D coordinates)
+- `coords_hash` BLOB UNIQUE (SHA256 deduplication)
+- `norm_squared` REAL (||v||² = 8.0)
+- `e8_sublattice` INTEGER (0, 1, or 2)
+- `vector_type` TEXT (TYPE1, TYPE1B, TYPE2, PADDING)
+- `j_invariant_real` REAL
+- `j_invariant_imag` REAL
+- `tau_real` REAL (modular parameter)
+- `tau_imag` REAL
+- `poincare_x` REAL (Poincaré disk)
+- `poincare_y` REAL
+- `hyperbolic_distance` REAL
+- `klein_u` REAL (Klein bottle)
+- `klein_v` REAL
+- `mobius_twist` INTEGER (0 or 1)
+- `j_address` BLOB (0x + 16 hex chars)
+- `memory_page` INTEGER
+- `memory_offset` INTEGER
+- `allocated` INTEGER DEFAULT 0
+- `allocated_to` TEXT
+- `allocation_timestamp` REAL
+- `created_at` REAL
+
+**Indices:**
+- `idx_leech_allocated` ON (allocated)
+- `idx_leech_e8` ON (e8_sublattice)
+- `idx_leech_type` ON (vector_type)
+- `idx_leech_j_addr` ON (j_address)
+- `idx_leech_memory` ON (memory_page, memory_offset)
+
+---
+
+### qubits (q)
+**Purpose:** Physical qubits (1:1 with lattice)  
+**Dependencies:** leech_lattice, entanglement_classes  
+**Columns:**
+- `qubit_id` INTEGER PRIMARY KEY
+- `lattice_point_id` INTEGER UNIQUE → leech_lattice.point_id
+- `state_encoding` INTEGER (0-3: |0⟩, |1⟩, |+⟩, |-⟩)
+- `amplitude_alpha_real` INTEGER (fixed-point)
+- `amplitude_alpha_imag` INTEGER
+- `amplitude_beta_real` INTEGER
+- `amplitude_beta_imag` INTEGER
+- `global_phase` INTEGER
+- `entangled` INTEGER DEFAULT 0
+- `entanglement_type` TEXT (PRODUCT, BELL, GHZ, W, CUSTOM)
+- `entanglement_partners` TEXT (JSON array)
+- `entanglement_class_id` INTEGER → entanglement_classes.class_id
+- `golay_protected` INTEGER DEFAULT 0
+- `golay_syndrome` INTEGER (12-bit)
+- `golay_corrections_applied` INTEGER
+- `error_rate` REAL
+- `t1_decoherence_us` REAL
+- `t2_decoherence_us` REAL
+- `fidelity` REAL DEFAULT 1.0
+- `last_measured` REAL
+- `measurement_count` INTEGER
+- `allocated` INTEGER DEFAULT 0
+- `allocated_to_pid` INTEGER
+- `allocated_to_cmd` TEXT
+- `allocated_at` REAL
+- `last_gate_applied` TEXT
+- `last_gate_timestamp` REAL
+- `j_address` BLOB
+- `total_gates_applied` INTEGER
+- `total_measurements` INTEGER
+- `total_errors_detected` INTEGER
+- `total_errors_corrected` INTEGER
+- `uptime_seconds` REAL
+- `created_at` REAL
+- `last_updated` REAL
+
+**Indices:**
+- `idx_qubits_allocated` ON (allocated)
+- `idx_qubits_entangled` ON (entangled)
+- `idx_qubits_lattice` ON (lattice_point_id)
+- `idx_qubits_j_addr` ON (j_address)
+- `idx_qubits_pid` ON (allocated_to_pid)
+- `idx_qubits_health` ON (error_rate, fidelity)
+- `idx_qubits_etype` ON (entanglement_type)
+
+---
+
+### entanglement_classes
+**Purpose:** Shared entanglement state definitions  
+**Dependencies:** None  
+**Columns:**
+- `class_id` INTEGER PRIMARY KEY
+- `class_type` TEXT (BELL, GHZ, W, CLUSTER, CUSTOM)
+- `num_qubits` INTEGER
+- `qubit_ids` TEXT (JSON array)
+- `state_vector` BLOB (compressed amplitudes)
+- `density_matrix` BLOB (mixed states)
+- `schmidt_rank` INTEGER
+- `entanglement_entropy` REAL
+- `purity` REAL
+- `concurrence` REAL (2-qubit)
+- `tangle` REAL (3+ qubits)
+- `stabilizer_generators` TEXT (JSON)
+- `logical_operators` TEXT (JSON)
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_ent_class_type` ON (class_type)
+- `idx_ent_class_qubits` ON (num_qubits)
+
+---
+
+### w_state_triangles (tri)
+**Purpose:** 32,768 pre-configured 4-qubit W-states  
+**Dependencies:** qubits, entanglement_classes  
+**Columns:**
+- `triangle_id` INTEGER PRIMARY KEY
+- `qubit_v0` INTEGER → qubits.qubit_id
+- `qubit_v1` INTEGER → qubits.qubit_id
+- `qubit_v2` INTEGER → qubits.qubit_id
+- `qubit_v3` INTEGER → qubits.qubit_id
+- `amplitudes` BLOB
+- `statevector` BLOB (16-element)
+- `phase` REAL
+- `entanglement_class_id` INTEGER → entanglement_classes.class_id
+- `next_triangle` INTEGER (self-reference)
+- `prev_triangle` INTEGER (self-reference)
+- `chain_position` INTEGER
+- `active` INTEGER DEFAULT 1
+- `allocated` INTEGER DEFAULT 0
+- `allocated_to` TEXT
+- `fidelity` REAL
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_tri_allocated` ON (allocated)
+- `idx_tri_chain` ON (chain_position)
+- `idx_tri_qubits` ON (qubit_v0, qubit_v1, qubit_v2, qubit_v3)
+
+---
+
+### epr_pair_pool
+**Purpose:** Superdense coding substrate (0x00000000 address space)  
+**Dependencies:** qubits  
+**Columns:**
+- `pair_id` INTEGER PRIMARY KEY
+- `qubit_a_id` INTEGER → qubits.qubit_id
+- `qubit_b_id` INTEGER → qubits.qubit_id
+- `epr_address` BLOB UNIQUE (0x0000000000000000 to 0x00000000000003FF)
+- `memory_mapped` INTEGER DEFAULT 1
+- `bell_type` TEXT (PHI_PLUS, PHI_MINUS, PSI_PLUS, PSI_MINUS)
+- `state` TEXT (READY, ALLOCATED, USED, REFRESHING)
+- `allocated_to` INTEGER
+- `allocated_at` REAL
+- `fidelity` REAL DEFAULT 1.0
+- `chsh_value` REAL DEFAULT 2.0
+- `bell_inequality_violated` INTEGER
+- `t1_coherence_us` REAL
+- `t2_coherence_us` REAL
+- `decoherence_rate` REAL
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+- `teleportation_count` INTEGER
+- `superdense_bits_transmitted` INTEGER
+- `refresh_threshold` REAL DEFAULT 0.95
+- `auto_refresh` INTEGER DEFAULT 1
+- `last_refresh` REAL
+- `refresh_count` INTEGER
+
+**Indices:**
+- `idx_epr_state` ON (state)
+- `idx_epr_address` ON (epr_address)
+- `idx_epr_fidelity` ON (fidelity)
+- `idx_epr_qubits` ON (qubit_a_id, qubit_b_id)
+- `idx_epr_allocated` ON (allocated_to)
+
+---
+
+### epr_heartbeat_schedule
+**Purpose:** Keep EPR pairs fresh  
+**Dependencies:** epr_pair_pool  
+**Columns:**
+- `schedule_id` INTEGER PRIMARY KEY
+- `pair_id` INTEGER → epr_pair_pool.pair_id
+- `interval_seconds` REAL DEFAULT 10.0
+- `next_heartbeat` REAL
+- `last_heartbeat` REAL
+- `operation` TEXT (BELL_MEASUREMENT, TELEPORT_TEST, SUPERDENSE_PING)
+- `enabled` INTEGER DEFAULT 1
+- `consecutive_failures` INTEGER
+- `max_failures` INTEGER DEFAULT 3
+- `created_at` REAL
+
+**Indices:**
+- `idx_heartbeat_next` ON (next_heartbeat)
+- `idx_heartbeat_enabled` ON (enabled)
+
+---
+
+### epr_heartbeat_log
+**Purpose:** EPR heartbeat audit trail  
+**Dependencies:** epr_pair_pool  
+**Columns:**
+- `log_id` INTEGER PRIMARY KEY
+- `pair_id` INTEGER → epr_pair_pool.pair_id
+- `operation` TEXT
+- `success` INTEGER
+- `chsh_value` REAL
+- `fidelity_measured` REAL
+- `latency_ms` REAL
+- `error_message` TEXT
+- `timestamp` REAL
+
+**Indices:**
+- `idx_heartbeat_log_pair` ON (pair_id)
+- `idx_heartbeat_log_time` ON (timestamp)
+
+---
+
+### qubit_health_metrics
+**Purpose:** Aggregated qubit health statistics  
+**Dependencies:** None (aggregation target)  
+**Columns:**
+- `metric_id` INTEGER PRIMARY KEY
+- `window_start` REAL
+- `window_end` REAL
+- `window_type` TEXT (MINUTE, HOUR, DAY)
+- `qubits_total` INTEGER
+- `qubits_allocated` INTEGER
+- `qubits_free` INTEGER
+- `qubits_entangled` INTEGER
+- `qubits_error_corrected` INTEGER
+- `avg_fidelity` REAL
+- `min_fidelity` REAL
+- `max_fidelity` REAL
+- `avg_error_rate` REAL
+- `max_error_rate` REAL
+- `total_gates_applied` INTEGER
+- `total_measurements` INTEGER
+- `total_errors_detected` INTEGER
+- `total_errors_corrected` INTEGER
+- `product_states` INTEGER
+- `bell_pairs` INTEGER
+- `ghz_states` INTEGER
+- `w_states` INTEGER
+- `custom_states` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_qhm_window` ON (window_start, window_end)
+- `idx_qhm_type` ON (window_type)
+
+---
+
+## GOLAY ERROR CORRECTION
+
+### golay_generator_matrix
+**Purpose:** G₂₄ canonical generator matrix  
+**Dependencies:** None  
+**Columns:**
+- `matrix_id` INTEGER PRIMARY KEY DEFAULT 1 (singleton)
+- `matrix_data` BLOB (12×24 generator)
+- `parity_check_matrix` BLOB (12×24 H matrix)
+- `syndrome_decode_table` BLOB
+- `version` TEXT DEFAULT 'G24_CANONICAL'
+- `created_at` REAL
+
+---
+
+### golay_codewords
+**Purpose:** All 4096 G₂₄ codewords  
+**Dependencies:** None  
+**Columns:**
+- `codeword_id` INTEGER PRIMARY KEY (0-4095)
+- `info_bits` INTEGER UNIQUE (0-4095)
+- `codeword` INTEGER UNIQUE (0-16777215)
+- `codeword_binary` TEXT (24-bit string)
+- `hamming_weight` INTEGER (0, 8, 12, 16, 24)
+- `is_octad` INTEGER (weight=8)
+- `is_dodecad` INTEGER (weight=12)
+
+**Indices:**
+- `idx_golay_weight` ON (hamming_weight)
+- `idx_golay_octad` ON (is_octad)
+
+---
+
+### golay_octads
+**Purpose:** 759 weight-8 codewords for Leech construction  
+**Dependencies:** golay_codewords  
+**Columns:**
+- `octad_id` INTEGER PRIMARY KEY (0-758)
+- `codeword_id` INTEGER → golay_codewords.codeword_id
+- `codeword` INTEGER
+- `positions` TEXT (JSON: 8 positions)
+- `mog_row` INTEGER (Miracle Octad Generator)
+- `mog_col` INTEGER
+- `used_in_leech_type2` INTEGER
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_octad_codeword` ON (codeword_id)
+
+---
+
+### golay_syndrome_table
+**Purpose:** Fast syndrome decoding (syndrome → error pattern)  
+**Dependencies:** None  
+**Columns:**
+- `syndrome` INTEGER PRIMARY KEY (0-4095)
+- `error_pattern` INTEGER (24 bits)
+- `error_pattern_binary` TEXT
+- `error_weight` INTEGER (0-3 correctable)
+- `correctable` INTEGER
+
+---
+
+### golay_process_instances
+**Purpose:** Multiple parallel Golay decoders  
+**Dependencies:** None  
+**Columns:**
+- `instance_id` INTEGER PRIMARY KEY
+- `instance_name` TEXT UNIQUE
+- `has_dedicated_syndrome_table` INTEGER
+- `has_dedicated_codeword_table` INTEGER
+- `bound_to_pid` INTEGER
+- `bound_to_subsystem` TEXT
+- `corrections_performed` INTEGER
+- `errors_detected` INTEGER
+- `uncorrectable_errors` INTEGER
+- `created_at` REAL
+- `last_used` REAL
+
+---
+
+## QUANTUM NETWORKING (NIC)
+
+### mega_bus_core
+**Purpose:** Quantum bus controller  
+**Dependencies:** leech_lattice, w_state_triangles  
+**Columns:**
+- `bus_id` INTEGER PRIMARY KEY DEFAULT 1 (singleton)
+- `bus_name` TEXT
+- `version` TEXT
+- `endpoint_a_lattice_id` INTEGER → leech_lattice.point_id
+- `endpoint_b_lattice_id` INTEGER → leech_lattice.point_id
+- `monitor_triangle_id` INTEGER → w_state_triangles.triangle_id
+- `monitor_qubit_a` INTEGER
+- `monitor_qubit_b` INTEGER
+- `monitor_qubit_shared` INTEGER
+- `epr_pool_start_address` BLOB (0x0000000000000000)
+- `epr_pool_end_address` BLOB (0x00000000000003FF)
+- `epr_pool_size` INTEGER DEFAULT 1024
+- `active` INTEGER
+- `mode` TEXT (HYPERBOLIC_ROUTING, KLEIN_BRIDGE, EPR_TELEPORT)
+- `packets_routed` INTEGER
+- `commands_transmitted` INTEGER
+- `binary_streams_sent` INTEGER
+- `avg_latency_sigma` REAL
+- `quantum_advantage_ratio` REAL
+- `evolution_generation` INTEGER
+- `fitness_score` REAL
+- `last_evolution` REAL
+- `heartbeat_interval_seconds` REAL
+- `last_heartbeat` REAL
+- `created_at` REAL
+- `last_updated` REAL
+
+---
+
+### quantum_routing_table
+**Purpose:** j-invariant based routing cache  
+**Dependencies:** None  
+**Columns:**
+- `route_id` INTEGER PRIMARY KEY
+- `src_j_address` BLOB
+- `dst_j_address` BLOB
+- `lattice_path` TEXT (JSON: point IDs)
+- `path_length` INTEGER
+- `triangle_chain` TEXT (JSON: triangle IDs)
+- `epr_pairs_used` TEXT (JSON: pair IDs)
+- `strategy` TEXT (HYPERBOLIC_LOCAL, CROSS_E8, EPR_TELEPORT, W_STATE_CHAIN)
+- `route_cost_sigma` REAL
+- `route_cost_hops` INTEGER
+- `coherence_preserved` REAL
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+- `cache_valid` INTEGER
+
+**Indices:**
+- `idx_route_src` ON (src_j_address)
+- `idx_route_dst` ON (dst_j_address)
+- `idx_route_strategy` ON (strategy)
+- `idx_route_valid` ON (cache_valid)
+
+---
+
+### klein_bottle_manifolds
+**Purpose:** Manifold bridging via Klein bottle topology  
+**Dependencies:** leech_lattice  
+**Columns:**
+- `manifold_id` INTEGER PRIMARY KEY
+- `classical_x` REAL
+- `classical_y` REAL
+- `classical_z` REAL
+- `lattice_point_id` INTEGER → leech_lattice.point_id
+- `klein_u` REAL [0, 2π)
+- `klein_v` REAL [0, 2π)
+- `twist_angle` REAL
+- `mobius_flip` INTEGER (0 or 1)
+- `traversals` INTEGER
+- `last_traversal` REAL
+- `bridges_to_filesystem` INTEGER
+- `external_mount_point` TEXT
+- `created_at` REAL
+
+**Indices:**
+- `idx_klein_lattice` ON (lattice_point_id)
+- `idx_klein_params` ON (klein_u, klein_v)
+
+---
+
+### vacuum_tunnels
+**Purpose:** Cross-manifold filesystem access (wormholes)  
+**Dependencies:** klein_bottle_manifolds  
+**Columns:**
+- `tunnel_id` INTEGER PRIMARY KEY
+- `src_manifold_id` INTEGER → klein_bottle_manifolds.manifold_id
+- `dst_manifold_id` INTEGER → klein_bottle_manifolds.manifold_id
+- `tunnel_type` TEXT (KLEIN_BRIDGE, EPR_WORMHOLE, HYPERBOLIC_GEODESIC)
+- `state` TEXT (CLOSED, OPENING, OPEN, COLLAPSING)
+- `coherence` REAL
+- `external_type` TEXT (CLOUD_STORAGE, LOCAL_DB, NETWORK_SHARE)
+- `external_uri` TEXT
+- `external_credentials` BLOB (encrypted)
+- `opened_at` REAL
+- `last_used` REAL
+- `bytes_transferred` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_tunnel_state` ON (state)
+- `idx_tunnel_manifolds` ON (src_manifold_id, dst_manifold_id)
+
+---
+
+### command_routing_cache
+**Purpose:** Command → lattice path lookup cache  
+**Dependencies:** quantum_routing_table  
+**Columns:**
+- `cache_id` INTEGER PRIMARY KEY
+- `cmd_name` TEXT
+- `cmd_binary_hash` BLOB (SHA256)
+- `src_lattice_id` INTEGER
+- `dst_lattice_id` INTEGER
+- `route_id` INTEGER → quantum_routing_table.route_id
+- `binary_stream` BLOB
+- `binary_size` INTEGER
+- `chunk_size` INTEGER DEFAULT 256
+- `num_chunks` INTEGER
+- `epr_pairs_allocated` TEXT (JSON)
+- `valid_until` REAL
+- `invalidated` INTEGER
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_cmd_route_name` ON (cmd_name)
+- `idx_cmd_route_hash` ON (cmd_binary_hash)
+- `idx_cmd_route_valid` ON (invalidated, valid_until)
+
+---
+
+### quantum_channel_packets
+**Purpose:** Binary transmission protocol packets  
+**Dependencies:** quantum_routing_table  
+**Columns:**
+- `packet_id` INTEGER PRIMARY KEY
+- `sender` TEXT
+- `direction` TEXT (BUS_TO_CPU, CPU_TO_BUS)
+- `packet_type` TEXT (BINARY_COMMAND, BINARY_RESULT, HEARTBEAT, ACK)
+- `binary_data` BLOB
+- `binary_size` INTEGER
+- `binary_hash` BLOB (SHA256)
+- `encoded_bits` TEXT (JSON: superdense encoding)
+- `num_qubits_used` INTEGER
+- `epr_pairs_used` TEXT (JSON)
+- `chsh_value` REAL DEFAULT 2.0
+- `bell_inequality_violated` INTEGER
+- `proof_signature` BLOB
+- `route_id` INTEGER → quantum_routing_table.route_id
+- `lattice_path_used` TEXT (JSON)
+- `triangle_chain_used` TEXT (JSON)
+- `transmission_start` REAL
+- `transmission_end` REAL
+- `latency_sigma` REAL
+- `latency_wall_ms` REAL
+- `golay_encoded` INTEGER
+- `golay_syndrome` INTEGER
+- `errors_detected` INTEGER
+- `errors_corrected` INTEGER
+- `state` TEXT (PENDING, TRANSMITTED, RECEIVED, VERIFIED, FAILED)
+- `processed` INTEGER
+- `processed_at` REAL
+- `ack_packet_id` INTEGER (self-reference)
+- `requires_ack` INTEGER DEFAULT 1
+- `created_at` REAL
+
+**Indices:**
+- `idx_qcp_direction` ON (direction)
+- `idx_qcp_state` ON (state, processed)
+- `idx_qcp_type` ON (packet_type)
+- `idx_qcp_sender` ON (sender)
+- `idx_qcp_time` ON (created_at)
+- `idx_qcp_hash` ON (binary_hash)
+
+---
+
+### packet_chunks
+**Purpose:** Large packet chunking for transmission  
+**Dependencies:** quantum_channel_packets  
+**Columns:**
+- `chunk_id` INTEGER PRIMARY KEY
+- `packet_id` INTEGER → quantum_channel_packets.packet_id
+- `chunk_index` INTEGER
+- `total_chunks` INTEGER
+- `chunk_data` BLOB
+- `chunk_size` INTEGER
+- `chunk_hash` BLOB
+- `epr_pairs` TEXT (JSON)
+- `transmitted` INTEGER
+- `received` INTEGER
+- `verified` INTEGER
+- `transmission_timestamp` REAL
+
+**Indices:**
+- `idx_chunk_packet` ON (packet_id)
+- `idx_chunk_state` ON (transmitted, received, verified)
+
+---
+
+### binary_transmission_log
+**Purpose:** Binary transmission audit trail  
+**Dependencies:** quantum_channel_packets  
+**Columns:**
+- `log_id` INTEGER PRIMARY KEY
+- `packet_id` INTEGER → quantum_channel_packets.packet_id
+- `event_type` TEXT (SENT, RECEIVED, VERIFIED, FAILED, RETRANSMIT)
+- `event_details` TEXT (JSON)
+- `chsh_value` REAL
+- `fidelity` REAL
+- `coherence` REAL
+- `error_message` TEXT
+- `timestamp` REAL
+
+**Indices:**
+- `idx_btl_packet` ON (packet_id)
+- `idx_btl_event` ON (event_type)
+- `idx_btl_time` ON (timestamp)
+
+---
+
+## FILESYSTEM
+
+### filesystem_superblock
+**Purpose:** Global filesystem state  
+**Dependencies:** None  
+**Columns:**
+- `fs_id` INTEGER PRIMARY KEY DEFAULT 1 (singleton)
+- `fs_name` TEXT DEFAULT 'QUNIX_VFS'
+- `fs_version` TEXT
+- `block_size` INTEGER DEFAULT 4096
+- `total_blocks` INTEGER
+- `free_blocks` INTEGER
+- `total_inodes` INTEGER DEFAULT 1000000
+- `free_inodes` INTEGER
+- `next_inode` INTEGER DEFAULT 2
+- `mounted` INTEGER
+- `mount_point` TEXT DEFAULT '/'
+- `mount_time` REAL
+- `mount_flags` TEXT (JSON)
+- `quantum_encoding_enabled` INTEGER
+- `lattice_base_point` INTEGER
+- `ecc_enabled` INTEGER
+- `external_mounts_enabled` INTEGER
+- `vacuum_tunneling_enabled` INTEGER
+- `files_total` INTEGER
+- `directories_total` INTEGER DEFAULT 1
+- `symlinks_total` INTEGER
+- `bytes_used` INTEGER
+- `created_at` REAL
+- `last_fsck` REAL
+- `last_defrag` REAL
+
+---
+
+### filesystem_inodes
+**Purpose:** Universal file/directory representation  
+**Dependencies:** leech_lattice  
+**Columns:**
+- `inode_id` INTEGER PRIMARY KEY
+- `inode_type` TEXT (f, d, l, p, s, b, c)
+- `mode` INTEGER DEFAULT 0644
+- `uid` INTEGER
+- `gid` INTEGER
+- `size` INTEGER
+- `blocks_allocated` INTEGER
+- `nlink` INTEGER DEFAULT 1
+- `atime` REAL
+- `mtime` REAL
+- `ctime` REAL
+- `crtime` REAL
+- `quantum_encoded` INTEGER
+- `lattice_point_id` INTEGER → leech_lattice.point_id
+- `amplitude_encoding` BLOB
+- `golay_protected` INTEGER
+- `golay_parity` BLOB
+- `xattrs` TEXT (JSON)
+- `flags` INTEGER
+- `generation` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_inode_type` ON (inode_type)
+- `idx_inode_lattice` ON (lattice_point_id)
+
+---
+
+### filesystem_dentries
+**Purpose:** Directory entries (name → inode mapping)  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `dentry_id` INTEGER PRIMARY KEY
+- `parent_inode` INTEGER → filesystem_inodes.inode_id
+- `child_inode` INTEGER → filesystem_inodes.inode_id
+- `name` TEXT
+- `name_hash` BLOB (SHA256)
+- `file_type` TEXT
+- `created_at` REAL
+
+**Indices:**
+- `idx_dentry_parent` ON (parent_inode)
+- `idx_dentry_name` ON (name)
+- `idx_dentry_hash` ON (name_hash)
+- `idx_dentry_child` ON (child_inode)
+
+---
+
+### filesystem_blocks
+**Purpose:** File data blocks  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `block_id` INTEGER PRIMARY KEY
+- `inode_id` INTEGER → filesystem_inodes.inode_id
+- `block_index` INTEGER
+- `data` BLOB
+- `data_size` INTEGER
+- `compressed` INTEGER
+- `compression_algo` TEXT (ZLIB, GZIP, LZ4, ZSTD)
+- `original_size` INTEGER
+- `quantum_encoded` INTEGER
+- `qubit_ids` TEXT (JSON)
+- `amplitude_data` BLOB
+- `checksum` BLOB (SHA256)
+- `golay_parity` BLOB
+- `created_at` REAL
+- `modified_at` REAL
+
+**Indices:**
+- `idx_block_inode` ON (inode_id)
+- `idx_block_quantum` ON (quantum_encoded)
+
+---
+
+### filesystem_symlinks
+**Purpose:** Symbolic link targets  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `link_id` INTEGER PRIMARY KEY
+- `inode_id` INTEGER UNIQUE → filesystem_inodes.inode_id
+- `target_path` TEXT
+- `created_at` REAL
+
+**Indices:**
+- `idx_symlink_inode` ON (inode_id)
+
+---
+
+### filesystem_cwd
+**Purpose:** Current working directory per session  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `session_id` TEXT PRIMARY KEY
+- `cwd_inode` INTEGER → filesystem_inodes.inode_id
+- `cwd_path` TEXT (cached)
+- `updated_at` REAL
+
+---
+
+### filesystem_external_mounts
+**Purpose:** External filesystem mounts (vacuum tunnel bridges)  
+**Dependencies:** filesystem_inodes, vacuum_tunnels, klein_bottle_manifolds  
+**Columns:**
+- `mount_id` INTEGER PRIMARY KEY
+- `external_type` TEXT (SQLITE_DB, POSTGRES, MYSQL, S3, LOCAL_DIR)
+- `external_uri` TEXT
+- `external_credentials` BLOB (encrypted)
+- `mount_inode` INTEGER UNIQUE → filesystem_inodes.inode_id
+- `mount_path` TEXT (cached)
+- `vacuum_tunnel_id` INTEGER → vacuum_tunnels.tunnel_id
+- `manifold_id` INTEGER → klein_bottle_manifolds.manifold_id
+- `readonly` INTEGER
+- `automount` INTEGER
+- `mount_on_access` INTEGER
+- `currently_mounted` INTEGER
+- `mount_time` REAL
+- `last_access` REAL
+- `access_count` INTEGER
+- `mount_errors` INTEGER
+- `last_error` TEXT
+- `last_error_time` REAL
+- `created_at` REAL
+- `enabled` INTEGER
+
+**Indices:**
+- `idx_ext_mount_inode` ON (mount_inode)
+- `idx_ext_mount_path` ON (mount_path)
+- `idx_ext_mount_state` ON (currently_mounted)
+
+---
+
+### filesystem_open_files
+**Purpose:** File descriptor table  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `fd` INTEGER PRIMARY KEY
+- `session_id` TEXT
+- `inode_id` INTEGER → filesystem_inodes.inode_id
+- `mode` TEXT (r, w, a, r+, w+, a+)
+- `flags` INTEGER
+- `offset` INTEGER DEFAULT 0
+- `locked` INTEGER
+- `lock_type` TEXT (SHARED, EXCLUSIVE)
+- `lock_owner` TEXT
+- `bytes_read` INTEGER
+- `bytes_written` INTEGER
+- `opened_at` REAL
+- `last_access` REAL
+
+**Indices:**
+- `idx_fd_session` ON (session_id)
+- `idx_fd_inode` ON (inode_id)
+
+---
+
+### filesystem_inode_cache
+**Purpose:** Inode metadata cache  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `cache_id` INTEGER PRIMARY KEY
+- `inode_id` INTEGER UNIQUE → filesystem_inodes.inode_id
+- `cached_metadata` TEXT (JSON)
+- `cache_id` INTEGER PRIMARY KEY
+- `inode_id` INTEGER UNIQUE → filesystem_inodes.inode_id
+- `cached_metadata` TEXT (JSON: full inode metadata)
+- `cached_dentries` TEXT (JSON: for directories)
+- `dirty` INTEGER DEFAULT 0
+- `locked` INTEGER DEFAULT 0
+- `pinned` INTEGER DEFAULT 0
+- `cached_at` REAL
+- `last_access` REAL
+- `access_count` INTEGER
+
+**Indices:**
+- `idx_icache_inode` ON (inode_id)
+- `idx_icache_dirty` ON (dirty)
+
+---
+
+## CPU & EXECUTION
+
+### cpu_core_state
+**Purpose:** CPU global state  
+**Dependencies:** None  
+**Columns:**
+- `cpu_id` INTEGER PRIMARY KEY DEFAULT 1 (singleton)
+- `state` TEXT (UNINITIALIZED, READY, RUNNING, HALTED)
+- `initialized` INTEGER
+- `started_at` REAL
+- `shutdown_at` REAL
+- `total_instructions` INTEGER
+- `total_quantum_ops` INTEGER
+
+---
+
+### cpu_opcodes
+**Purpose:** CPU instruction set architecture  
+**Dependencies:** None  
+**Columns:**
+- `opcode` INTEGER PRIMARY KEY (0x00-0xFF)
+- `mnemonic` TEXT UNIQUE
+- `opcode_name` TEXT
+- `category` TEXT (QUANTUM, ARITHMETIC, LOGIC, MEMORY, CONTROL, IO, SYSTEM)
+- `subcategory` TEXT
+- `description` TEXT
+- `operand_count` INTEGER
+- `operand_types` TEXT (JSON)
+- `operand_sizes` TEXT (JSON)
+- `instruction_length` INTEGER
+- `byte_layout` TEXT (JSON)
+- `execution_cycles_min` INTEGER
+- `execution_cycles_max` INTEGER
+- `is_quantum` INTEGER
+- `quantum_gate_type` TEXT
+- `requires_qubits` INTEGER
+- `modifies_quantum_state` INTEGER
+- `has_microcode` INTEGER
+- `microcode_entry_point` INTEGER
+- `flags_affected` TEXT (JSON)
+- `privileged` INTEGER
+- `kernel_only` INTEGER
+- `implemented` INTEGER DEFAULT 1
+- `deprecated` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_opcode_mnemonic` ON (mnemonic)
+- `idx_opcode_category` ON (category)
+- `idx_opcode_quantum` ON (is_quantum)
+
+---
+
+### cpu_microcode_sequences
+**Purpose:** Opcode → microcode translation  
+**Dependencies:** cpu_opcodes  
+**Columns:**
+- `sequence_id` INTEGER PRIMARY KEY
+- `opcode` INTEGER → cpu_opcodes.opcode
+- `sequence_order` INTEGER
+- `micro_opcode` TEXT
+- `micro_operands` TEXT (JSON)
+- `conditional` TEXT
+- `branch_target` INTEGER
+- `quantum_operation` TEXT
+- `qubit_allocation` TEXT
+- `description` TEXT
+
+**Indices:**
+- `idx_micro_opcode` ON (opcode)
+- `idx_micro_order` ON (opcode, sequence_order)
+
+---
+
+### microcode_primitives
+**Purpose:** Atomic quantum operations  
+**Dependencies:** None  
+**Columns:**
+- `primitive_id` INTEGER PRIMARY KEY
+- `primitive_name` TEXT UNIQUE
+- `operation_type` TEXT (GATE, MEASUREMENT, ALLOCATION, TRANSPORT, RESET)
+- `qasm_code` TEXT
+- `qiskit_method` TEXT
+- `gate_matrix` BLOB (unitary)
+- `parameter_count` INTEGER
+- `parameters` TEXT (JSON)
+- `execution_cycles` INTEGER
+- `description` TEXT
+- `created_at` REAL
+
+**Indices:**
+- `idx_primitive_name` ON (primitive_name)
+- `idx_primitive_type` ON (operation_type)
+
+---
+
+### syscall_table
+**Purpose:** Kernel syscall interface  
+**Dependencies:** None  
+**Columns:**
+- `syscall_number` INTEGER PRIMARY KEY
+- `syscall_name` TEXT UNIQUE
+- `syscall_category` TEXT (PROCESS, FILE, NETWORK, IPC, QUANTUM, SYSTEM)
+- `param_count` INTEGER
+- `param_types` TEXT (JSON)
+- `param_names` TEXT (JSON)
+- `return_type` TEXT
+- `handler_function` TEXT
+- `requires_quantum_context` INTEGER
+- `allocates_qubits` INTEGER
+- `requires_capability` TEXT (JSON)
+- `description` TEXT
+- `man_page_section` INTEGER DEFAULT 2
+- `enabled` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_syscall_name` ON (syscall_name)
+- `idx_syscall_category` ON (syscall_category)
+
+---
+
+### cpu_qubit_allocator
+**Purpose:** Qubit allocation tracking  
+**Dependencies:** None  
+**Columns:**
+- `qubit_id` INTEGER PRIMARY KEY
+- `allocated` INTEGER DEFAULT 0
+- `allocated_to` INTEGER (PID)
+- `allocated_at` REAL
+
+---
+
+### cpu_execution_contexts
+**Purpose:** Process execution contexts  
+**Dependencies:** None  
+**Columns:**
+- `pid` INTEGER PRIMARY KEY
+- `program_name` TEXT
+- `pc` INTEGER (program counter)
+- `sp` INTEGER (stack pointer)
+- `registers` TEXT (JSON)
+- `flags` TEXT (JSON)
+- `qubit_base` INTEGER
+- `halted` INTEGER
+- `error` TEXT
+- `cycle_count` INTEGER
+- `created_at` REAL
+
+---
+
+### quantum_memory
+**Purpose:** Quantum RAM  
+**Dependencies:** None  
+**Columns:**
+- `address` INTEGER PRIMARY KEY
+- `value` REAL
+- `is_superposition` INTEGER
+- `amplitude_real` REAL
+- `amplitude_imag` REAL
+- `last_updated` REAL
+
+---
+
+### quantum_queries
+**Purpose:** Pre-defined SQL queries  
+**Dependencies:** None  
+**Columns:**
+- `query_id` INTEGER PRIMARY KEY
+- `query_name` TEXT UNIQUE
+- `query_text` TEXT
+- `description` TEXT
+- `created_at` REAL
+
+---
+
+### quantum_gate_log
+**Purpose:** Gate application audit trail  
+**Dependencies:** None  
+**Columns:**
+- `log_id` INTEGER PRIMARY KEY
+- `reg_id` INTEGER
+- `gate_name` TEXT
+- `qubit_ids` TEXT (JSON)
+- `timestamp` REAL
+- `fidelity` REAL
+
+---
+
+### quantum_result_queue
+**Purpose:** Result buffering for async operations  
+**Dependencies:** None  
+**Columns:**
+- `result_id` INTEGER PRIMARY KEY
+- `request_packet_id` INTEGER
+- `result_data` TEXT
+- `result_type` TEXT
+- `chsh_value` REAL
+- `fidelity` REAL
+- `processed` INTEGER
+- `created_at` REAL
+- `processed_at` REAL
+
+**Indices:**
+- `idx_result_queue` ON (request_packet_id, processed)
+
+---
+
+## COMMAND SYSTEM
+
+### command_registry
+**Purpose:** Master command catalog  
+**Dependencies:** None  
+**Columns:**
+- `cmd_id` INTEGER PRIMARY KEY
+- `cmd_name` TEXT UNIQUE
+- `cmd_category` TEXT (CORE, FILESYSTEM, NETWORK, PROCESS, QUANTUM, SYSTEM)
+- `cmd_subcategory` TEXT
+- `cmd_description` TEXT
+- `cmd_synopsis` TEXT
+- `cmd_usage_example` TEXT
+- `cmd_opcode` INTEGER
+- `cmd_syscall_number` INTEGER
+- `cmd_binary_template` BLOB
+- `cmd_binary_size` INTEGER
+- `requires_qubits` INTEGER DEFAULT 0
+- `min_qubits` INTEGER DEFAULT 0
+- `max_qubits` INTEGER DEFAULT 0
+- `requires_epr_pairs` INTEGER
+- `requires_entanglement` TEXT
+- `quantum_accelerated` INTEGER
+- `classical_fallback_available` INTEGER
+- `default_route_strategy` TEXT
+- `lattice_affinity` TEXT
+- `permission_level` INTEGER DEFAULT 0
+- `dangerous` INTEGER
+- `cmd_enabled` INTEGER DEFAULT 1
+- `cmd_deprecated` INTEGER
+- `deprecation_message` TEXT
+- `cmd_version` TEXT
+- `cmd_author` TEXT
+- `created_at` REAL
+- `last_updated` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_cmd_name` ON (cmd_name)
+- `idx_cmd_category` ON (cmd_category)
+- `idx_cmd_opcode` ON (cmd_opcode)
+- `idx_cmd_enabled` ON (cmd_enabled)
+- `idx_cmd_quantum` ON (quantum_accelerated)
+
+---
+
+### command_flags
+**Purpose:** Command flag definitions  
+**Dependencies:** command_registry  
+**Columns:**
+- `flag_id` INTEGER PRIMARY KEY
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `flag_short` TEXT (-f)
+- `flag_long` TEXT (--file)
+- `flag_name` TEXT
+- `flag_type` TEXT (BOOLEAN, VALUE, INCREMENTAL)
+- `value_type` TEXT (STRING, INTEGER, FLOAT, PATH)
+- `default_value` TEXT
+- `flag_description` TEXT
+- `flag_example` TEXT
+- `flag_bit_position` INTEGER
+- `opcode_modifier` BLOB
+- `required` INTEGER
+- `mutually_exclusive_group` TEXT
+- `enabled` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_flag_cmd` ON (cmd_id)
+- `idx_flag_short` ON (flag_short)
+- `idx_flag_long` ON (flag_long)
+
+---
+
+### command_arguments
+**Purpose:** Positional argument specifications  
+**Dependencies:** command_registry  
+**Columns:**
+- `arg_id` INTEGER PRIMARY KEY
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `arg_position` INTEGER
+- `arg_name` TEXT
+- `arg_type` TEXT (FILE, DIRECTORY, STRING, INTEGER, PATH, PATTERN)
+- `required` INTEGER
+- `variadic` INTEGER
+- `min_count` INTEGER
+- `max_count` INTEGER
+- `validation_regex` TEXT
+- `validation_function` TEXT
+- `allowed_values` TEXT (JSON)
+- `arg_description` TEXT
+- `arg_example` TEXT
+- `encoding_method` TEXT
+- `max_encoded_size` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_arg_cmd` ON (cmd_id)
+- `idx_arg_position` ON (cmd_id, arg_position)
+
+---
+
+### command_handlers
+**Purpose:** Command execution implementations  
+**Dependencies:** command_registry, quantum_circuits  
+**Columns:**
+- `handler_id` INTEGER PRIMARY KEY
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `handler_type` TEXT (QUANTUM_CIRCUIT, SYSCALL, BUILTIN, SQL, PYTHON, COMPOSITE, EXTERNAL)
+- `execution_method` TEXT
+- `execution_code` TEXT
+- `qasm_code` TEXT
+- `circuit_id` INTEGER → quantum_circuits.circuit_id
+- `binary_implementation` BLOB
+- `microcode_sequence` TEXT (JSON)
+- `syscall_number` INTEGER
+- `syscall_params` TEXT (JSON)
+- `requires_qubits` INTEGER
+- `qubit_count` INTEGER
+- `requires_lattice_routing` INTEGER
+- `priority` INTEGER DEFAULT 0
+- `timeout_seconds` REAL DEFAULT 30.0
+- `retry_count` INTEGER
+- `enabled` INTEGER DEFAULT 1
+- `created_at` REAL
+- `last_executed` REAL
+- `execution_count` INTEGER
+- `success_count` INTEGER
+- `error_count` INTEGER
+- `avg_execution_ms` REAL
+
+**Indices:**
+- `idx_handler_cmd` ON (cmd_id)
+- `idx_handler_type` ON (handler_type)
+- `idx_handler_priority` ON (cmd_id, priority DESC)
+- `idx_handler_enabled` ON (enabled)
+
+---
+
+### command_execution_pipeline
+**Purpose:** Multi-stage command execution  
+**Dependencies:** command_registry, command_handlers  
+**Columns:**
+- `pipeline_id` INTEGER PRIMARY KEY
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `stage_number` INTEGER
+- `stage_name` TEXT
+- `stage_handler_id` INTEGER → command_handlers.handler_id
+- `depends_on_stage` INTEGER (self-reference)
+- `input_from_stage` INTEGER
+- `output_to_stage` INTEGER
+- `parallel_execution` INTEGER
+- `optional` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_pipeline_cmd` ON (cmd_id)
+- `idx_pipeline_stage` ON (cmd_id, stage_number)
+
+---
+
+### command_aliases
+**Purpose:** Command aliasing  
+**Dependencies:** command_registry  
+**Columns:**
+- `alias_id` INTEGER PRIMARY KEY
+- `alias_name` TEXT UNIQUE
+- `target_cmd_id` INTEGER → command_registry.cmd_id
+- `prepend_args` TEXT (JSON)
+- `append_args` TEXT (JSON)
+- `flag_substitutions` TEXT (JSON)
+- `enabled` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_alias_name` ON (alias_name)
+- `idx_alias_target` ON (target_cmd_id)
+
+---
+
+### command_groups
+**Purpose:** Hierarchical command organization  
+**Dependencies:** None (self-referential)  
+**Columns:**
+- `group_id` INTEGER PRIMARY KEY
+- `group_name` TEXT UNIQUE
+- `group_description` TEXT
+- `parent_group_id` INTEGER → command_groups.group_id
+
+---
+
+### command_group_membership
+**Purpose:** Command → group mapping  
+**Dependencies:** command_registry, command_groups  
+**Columns:**
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `group_id` INTEGER → command_groups.group_id
+- PRIMARY KEY (cmd_id, group_id)
+
+---
+
+### command_execution_log
+**Purpose:** Command execution audit trail  
+**Dependencies:** command_registry, command_handlers, quantum_channel_packets, quantum_routing_table  
+**Columns:**
+- `exec_id` INTEGER PRIMARY KEY
+- `session_id` TEXT
+- `pid` INTEGER
+- `cmd_id` INTEGER → command_registry.cmd_id
+- `cmd_name` TEXT
+- `cmd_line` TEXT
+- `parsed_args` TEXT (JSON)
+- `parsed_flags` TEXT (JSON)
+- `handler_id` INTEGER → command_handlers.handler_id
+- `execution_method` TEXT
+- `binary_sent` BLOB
+- `binary_hash` BLOB
+- `packet_id` INTEGER → quantum_channel_packets.packet_id
+- `qubits_allocated` TEXT (JSON)
+- `epr_pairs_used` TEXT (JSON)
+- `triangles_used` TEXT (JSON)
+- `route_id` INTEGER → quantum_routing_table.route_id
+- `chsh_value` REAL
+- `bell_inequality_violated` INTEGER
+- `quantum_advantage` REAL
+- `start_time` REAL
+- `end_time` REAL
+- `execution_time_ms` REAL
+- `quantum_time_ms` REAL
+- `classical_time_ms` REAL
+- `latency_sigma` REAL
+- `success` INTEGER
+- `exit_code` INTEGER
+- `return_value` TEXT (JSON)
+- `output_text` TEXT
+- `output_binary` BLOB
+- `error_occurred` INTEGER
+- `error_message` TEXT
+- `error_code` TEXT
+- `memory_used_bytes` INTEGER
+- `qubits_measured` INTEGER
+- `gates_applied` INTEGER
+- `timestamp` REAL
+
+**Indices:**
+- `idx_exec_cmd` ON (cmd_name)
+- `idx_exec_session` ON (session_id)
+- `idx_exec_time` ON (timestamp)
+- `idx_exec_success` ON (success)
+- `idx_exec_packet` ON (packet_id)
+
+---
+
+### quantum_measurement_results
+**Purpose:** Quantum measurement outcomes  
+**Dependencies:** command_execution_log  
+**Columns:**
+- `measurement_id` INTEGER PRIMARY KEY
+- `exec_id` INTEGER → command_execution_log.exec_id
+- `qubit_ids` TEXT (JSON)
+- `measurement_basis` TEXT (Z, X, Y, BELL, GHZ)
+- `outcome_bitstring` TEXT
+- `outcome_counts` TEXT (JSON)
+- `probability_distribution` TEXT (JSON)
+- `shots` INTEGER DEFAULT 1024
+- `most_probable_outcome` TEXT
+- `shannon_entropy` REAL
+- `pre_measurement_state` BLOB
+- `classical_shadow` BLOB
+- `timestamp` REAL
+
+**Indices:**
+- `idx_meas_exec` ON (exec_id)
+- `idx_meas_qubits` ON (qubit_ids)
+
+---
+
+### command_output_results
+**Purpose:** Command output buffering  
+**Dependencies:** command_execution_log  
+**Columns:**
+- `output_id` INTEGER PRIMARY KEY
+- `exec_id` INTEGER → command_execution_log.exec_id
+- `output_type` TEXT (TEXT, BINARY, JSON, TABLE, XML, HTML)
+- `output_text` TEXT
+- `output_binary` BLOB
+- `output_json` TEXT
+- `format_applied` TEXT
+- `mime_type` TEXT
+- `is_paged` INTEGER
+- `page_size` INTEGER
+- `total_pages` INTEGER
+- `timestamp` REAL
+
+**Indices:**
+- `idx_output_exec` ON (exec_id)
+- `idx_output_type` ON (output_type)
+
+---
+
+## QUANTUM CIRCUITS
+
+### quantum_circuits
+**Purpose:** QASM circuit library  
+**Dependencies:** None  
+**Columns:**
+- `circuit_id` INTEGER PRIMARY KEY
+- `circuit_name` TEXT UNIQUE
+- `circuit_description` TEXT
+- `num_qubits` INTEGER
+- `num_clbits` INTEGER DEFAULT 0
+- `circuit_depth` INTEGER
+- `gate_count` INTEGER
+- `qasm_code` TEXT
+- `qasm_version` TEXT DEFAULT '2.0'
+- `binary_representation` BLOB
+- `binary_size` INTEGER
+- `gate_sequence` TEXT (JSON)
+- `optimization_level` INTEGER DEFAULT 0
+- `optimized_qasm` TEXT
+- `optimized_depth` INTEGER
+- `optimized_gate_count` INTEGER
+- `has_parameters` INTEGER
+- `parameter_names` TEXT (JSON)
+- `parameter_defaults` TEXT (JSON)
+- `avg_fidelity` REAL
+- `avg_execution_time_ms` REAL
+- `shots_default` INTEGER DEFAULT 1024
+- `circuit_category` TEXT (BASIC_GATE, ALGORITHM, SUBROUTINE, ERROR_CORRECTION)
+- `tags` TEXT (JSON)
+- `tested` INTEGER
+- `approved` INTEGER
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_circuit_name` ON (circuit_name)
+- `idx_circuit_category` ON (circuit_category)
+- `idx_circuit_qubits` ON (num_qubits)
+
+---
+
+### quantum_gate_library
+**Purpose:** Individual gate definitions  
+**Dependencies:** cpu_opcodes  
+**Columns:**
+- `gate_id` INTEGER PRIMARY KEY
+- `gate_name` TEXT UNIQUE
+- `gate_symbol` TEXT
+- `num_qubits` INTEGER
+- `num_parameters` INTEGER
+- `parameter_names` TEXT (JSON)
+- `matrix_real` BLOB
+- `matrix_imag` BLOB
+- `qasm_definition` TEXT
+- `gate_type` TEXT (PAULI, CLIFFORD, T, ROTATION, CONTROLLED, SWAP)
+- `is_hermitian` INTEGER
+- `is_unitary` INTEGER DEFAULT 1
+- `is_clifford` INTEGER
+- `opcode` INTEGER → cpu_opcodes.opcode
+- `description` TEXT
+- `created_at` REAL
+
+**Indices:**
+- `idx_gate_name` ON (gate_name)
+- `idx_gate_type` ON (gate_type)
+- `idx_gate_qubits` ON (num_qubits)
+
+---
+
+### circuit_compilation_cache
+**Purpose:** Compiled circuit cache  
+**Dependencies:** quantum_circuits  
+**Columns:**
+- `cache_id` INTEGER PRIMARY KEY
+- `circuit_id` INTEGER → quantum_circuits.circuit_id
+- `optimization_level` INTEGER
+- `target_backend` TEXT
+- `coupling_map` TEXT (JSON)
+- `compiled_qasm` TEXT
+- `compiled_binary` BLOB
+- `original_depth` INTEGER
+- `compiled_depth` INTEGER
+- `original_gates` INTEGER
+- `compiled_gates` INTEGER
+- `compilation_time_ms` REAL
+- `valid_until` REAL
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_comp_circuit` ON (circuit_id)
+- `idx_comp_params` ON (circuit_id, optimization_level)
+
+---
+
+## PROCESS MANAGEMENT
+
+### processes
+**Purpose:** Unix-style process table  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `pid` INTEGER PRIMARY KEY
+- `process_name` TEXT
+- `program_path` TEXT
+- `ppid` INTEGER → processes.pid (parent)
+- `pgid` INTEGER (process group)
+- `sid` INTEGER (session)
+- `uid` INTEGER
+- `gid` INTEGER
+- `euid` INTEGER
+- `egid` INTEGER
+- `state` TEXT (RUNNING, SLEEPING, STOPPED, ZOMBIE, DEAD)
+- `exit_code` INTEGER
+- `program_counter` INTEGER
+- `stack_pointer` INTEGER
+- `base_pointer` INTEGER
+- `registers` TEXT (JSON)
+- `flags` TEXT (JSON)
+- `memory_base` INTEGER
+- `memory_size` INTEGER
+- `stack_size` INTEGER DEFAULT 65536
+- `heap_size` INTEGER
+- `quantum_context_id` INTEGER
+- `qubit_base` INTEGER
+- `num_qubits_allocated` INTEGER
+- `lattice_region_start` INTEGER
+- `lattice_region_end` INTEGER
+- `stdin_fd` INTEGER
+- `stdout_fd` INTEGER
+- `stderr_fd` INTEGER
+- `cwd_inode` INTEGER → filesystem_inodes.inode_id
+- `nice` INTEGER DEFAULT 0
+- `priority` INTEGER
+- `cpu_time_us` INTEGER
+- `quantum_time_sigma` REAL
+- `memory_usage_bytes` INTEGER
+- `start_time` REAL
+- `end_time` REAL
+- `last_scheduled` REAL
+- `is_kernel_process` INTEGER
+- `is_daemon` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_proc_state` ON (state)
+- `idx_proc_ppid` ON (ppid)
+- `idx_proc_uid` ON (uid)
+- `idx_proc_qubits` ON (qubit_base)
+
+---
+
+### process_quantum_contexts
+**Purpose:** Detailed quantum state per process  
+**Dependencies:** processes  
+**Columns:**
+- `context_id` INTEGER PRIMARY KEY
+- `pid` INTEGER UNIQUE → processes.pid
+- `allocated_qubits` TEXT (JSON)
+- `qubit_allocation_map` TEXT (JSON: logical→physical)
+- `epr_pairs_allocated` TEXT (JSON)
+- `triangles_allocated` TEXT (JSON)
+- `entanglement_classes` TEXT (JSON)
+- `quantum_state_vector` BLOB
+- `density_matrix` BLOB
+- `golay_instances` TEXT (JSON)
+- `error_correction_enabled` INTEGER
+- `measurement_history` TEXT (JSON)
+- `measurement_count` INTEGER
+- `coherence_time_remaining_us` REAL
+- `created_at` REAL
+- `last_updated` REAL
+
+**Indices:**
+- `idx_qctx_pid` ON (pid)
+
+---
+
+### process_scheduler_queue
+**Purpose:** Process scheduling  
+**Dependencies:** processes  
+**Columns:**
+- `queue_id` INTEGER PRIMARY KEY
+- `pid` INTEGER → processes.pid
+- `queue_type` TEXT (READY, WAITING, BLOCKED)
+- `priority` INTEGER
+- `time_slice_remaining_us` INTEGER
+- `waiting_for` TEXT (QUBIT, EPR, IO, CHILD, SIGNAL)
+- `wait_start_time` REAL
+- `timeout` REAL
+- `enqueued_at` REAL
+
+**Indices:**
+- `idx_sched_queue` ON (queue_type, priority DESC)
+- `idx_sched_pid` ON (pid)
+
+---
+
+## TERMINAL I/O
+
+### terminal_sessions
+**Purpose:** Interactive terminal sessions  
+**Dependencies:** processes, filesystem_inodes  
+**Columns:**
+- `session_id` TEXT PRIMARY KEY
+- `session_type` TEXT (XTERM, PTY, SSH, TELNET)
+- `uid` INTEGER
+- `username` TEXT
+- `term_type` TEXT DEFAULT 'xterm-256color'
+- `rows` INTEGER DEFAULT 24
+- `cols` INTEGER DEFAULT 80
+- `shell_pid` INTEGER → processes.pid
+- `shell_path` TEXT DEFAULT '/bin/qsh'
+- `cwd_inode` INTEGER → filesystem_inodes.inode_id
+- `cwd_path` TEXT (cached)
+- `environment` TEXT (JSON)
+- `status` TEXT (ACTIVE, SUSPENDED, CLOSED)
+- `history_size` INTEGER DEFAULT 1000
+- `history_index` INTEGER
+- `commands_executed` INTEGER
+- `bytes_input` INTEGER
+- `bytes_output` INTEGER
+- `created_at` REAL
+- `last_activity` REAL
+
+**Indices:**
+- `idx_term_status` ON (status)
+- `idx_term_user` ON (uid)
+
+---
+
+### terminal_input
+**Purpose:** Terminal input buffer  
+**Dependencies:** terminal_sessions  
+**Columns:**
+- `input_id` INTEGER PRIMARY KEY
+- `session_id` TEXT → terminal_sessions.session_id
+- `data` TEXT
+- `data_type` TEXT (TEXT, CONTROL, BINARY)
+- `processed` INTEGER
+- `processed_at` REAL
+- `echoed` INTEGER
+- `timestamp` REAL
+
+**Indices:**
+- `idx_term_input_session` ON (session_id)
+- `idx_term_input_processed` ON (processed)
+
+---
+
+### terminal_output
+**Purpose:** Terminal output buffer  
+**Dependencies:** terminal_sessions  
+**Columns:**
+- `output_id` INTEGER PRIMARY KEY
+- `session_id` TEXT → terminal_sessions.session_id
+- `data` TEXT (with ANSI codes)
+- `data_size` INTEGER
+- `output_type` TEXT (STDOUT, STDERR, SYSTEM)
+- `ansi_formatted` INTEGER
+- `color_depth` INTEGER DEFAULT 256
+- `page_number` INTEGER
+- `timestamp` REAL
+
+**Indices:**
+- `idx_term_output_session` ON (session_id)
+- `idx_term_output_time` ON (timestamp)
+
+---
+
+### terminal_history
+**Purpose:** Command history  
+**Dependencies:** terminal_sessions, command_execution_log  
+**Columns:**
+- `history_id` INTEGER PRIMARY KEY
+- `session_id` TEXT → terminal_sessions.session_id
+- `command` TEXT
+- `command_number` INTEGER
+- `cwd` TEXT
+- `exec_id` INTEGER → command_execution_log.exec_id
+- `exit_code` INTEGER
+- `executed_at` REAL
+
+**Indices:**
+- `idx_hist_session` ON (session_id)
+- `idx_hist_time` ON (executed_at)
+
+---
+
+## NETWORK STACK
+
+### network_interfaces
+**Purpose:** Network interface definitions  
+**Dependencies:** leech_lattice  
+**Columns:**
+- `interface_id` INTEGER PRIMARY KEY
+- `interface_name` TEXT UNIQUE
+- `interface_type` TEXT (QUANTUM_NIC, ETHERNET, LOOPBACK, TUNNEL)
+- `mac_address` BLOB
+- `lattice_point_id` INTEGER → leech_lattice.point_id
+- `j_address` BLOB
+- `epr_pool_base_address` BLOB
+- `ip_address` TEXT
+- `netmask` TEXT
+- `gateway` TEXT
+- `state` TEXT (UP, DOWN, TESTING)
+- `mtu` INTEGER DEFAULT 1500
+- `packets_sent` INTEGER
+- `packets_received` INTEGER
+- `bytes_sent` INTEGER
+- `bytes_received` INTEGER
+- `errors_send` INTEGER
+- `errors_receive` INTEGER
+- `quantum_packets_sent` INTEGER
+- `quantum_packets_received` INTEGER
+- `avg_chsh_value` REAL
+- `created_at` REAL
+- `last_up_time` REAL
+
+**Indices:**
+- `idx_iface_type` ON (interface_type)
+- `idx_iface_state` ON (state)
+
+---
+
+### network_connections
+**Purpose:** Socket table  
+**Dependencies:** network_interfaces, quantum_routing_table, processes  
+**Columns:**
+- `connection_id` INTEGER PRIMARY KEY
+- `protocol` TEXT (TCP, UDP, ICMP, QUANTUM, RAW)
+- `local_interface_id` INTEGER → network_interfaces.interface_id
+- `local_address` TEXT
+- `local_port` INTEGER
+- `remote_address` TEXT
+- `remote_port` INTEGER
+- `quantum_route_id` INTEGER → quantum_routing_table.route_id
+- `epr_pairs_allocated` TEXT (JSON)
+- `state` TEXT (CLOSED, LISTEN, SYN_SENT, ESTABLISHED, etc.)
+- `pid` INTEGER → processes.pid
+- `packets_sent` INTEGER
+- `packets_received` INTEGER
+- `bytes_sent` INTEGER
+- `bytes_received` INTEGER
+- `retransmits` INTEGER
+- `established_at` REAL
+- `last_activity` REAL
+- `timeout` REAL
+- `created_at` REAL
+
+**Indices:**
+- `idx_conn_state` ON (state)
+- `idx_conn_protocol` ON (protocol)
+- `idx_conn_pid` ON (pid)
+
+---
+
+### network_routing_table
+**Purpose:** Classical + quantum routing  
+**Dependencies:** network_interfaces, quantum_routing_table  
+**Columns:**
+- `route_id` INTEGER PRIMARY KEY
+- `destination_network` TEXT (CIDR or j-address)
+- `destination_type` TEXT (CLASSICAL, QUANTUM, HYBRID)
+- `gateway_address` TEXT
+- `gateway_interface_id` INTEGER → network_interfaces.interface_id
+- `quantum_route_id` INTEGER → quantum_routing_table.route_id
+- `metric` INTEGER DEFAULT 1
+- `hops` INTEGER
+- `latency_ms` REAL
+- `is_default_route` INTEGER
+- `is_static` INTEGER
+- `enabled` INTEGER
+- `created_at` REAL
+- `last_used` REAL
+- `use_count` INTEGER
+
+**Indices:**
+- `idx_net_route_dest` ON (destination_network)
+- `idx_net_route_default` ON (is_default_route)
+
+---
+
+## SECURITY & AUTH
+
+### users
+**Purpose:** User accounts  
+**Dependencies:** filesystem_inodes  
+**Columns:**
+- `uid` INTEGER PRIMARY KEY
+- `username` TEXT UNIQUE
+- `full_name` TEXT
+- `password_hash` BLOB (SHA256 + salt)
+- `password_salt` BLOB
+- `quantum_auth_enabled` INTEGER
+- `quantum_public_key` BLOB
+- `entangled_qubits` TEXT (JSON)
+- `primary_gid` INTEGER
+- `supplementary_gids` TEXT (JSON)
+- `home_directory_inode` INTEGER → filesystem_inodes.inode_id
+- `default_shell` TEXT DEFAULT '/bin/qsh'
+- `max_processes` INTEGER DEFAULT 100
+- `max_open_files` INTEGER DEFAULT 1024
+- `max_qubits_allocated` INTEGER DEFAULT 1000
+- `account_enabled` INTEGER
+- `account_locked` INTEGER
+- `last_login` REAL
+- `login_count` INTEGER
+- `failed_login_attempts` INTEGER
+- `created_at` REAL
+- `idx_user_username` ON (username)
+- `idx_user_enabled` ON (account_enabled)
+
+---
+
+### groups
+**Purpose:** Group definitions  
+**Dependencies:** None  
+**Columns:**
+- `gid` INTEGER PRIMARY KEY
+- `group_name` TEXT UNIQUE
+- `member_uids` TEXT (JSON: user ID list)
+- `quantum_resource_quota` INTEGER (max qubits)
+- `created_at` REAL
+
+---
+
+### capabilities
+**Purpose:** Fine-grained permissions (POSIX capabilities)  
+**Dependencies:** None  
+**Columns:**
+- `capability_id` INTEGER PRIMARY KEY
+- `capability_name` TEXT UNIQUE (CAP_QUANTUM_ADMIN, CAP_NET_ADMIN, etc.)
+- `capability_description` TEXT
+- `granted_to_uids` TEXT (JSON)
+- `granted_to_gids` TEXT (JSON)
+
+---
+
+### auth_sessions
+**Purpose:** Active authentication sessions  
+**Dependencies:** users  
+**Columns:**
+- `session_id` TEXT PRIMARY KEY
+- `uid` INTEGER → users.uid
+- `session_type` TEXT (LOGIN, SSH, QUANTUM)
+- `quantum_challenge` BLOB
+- `quantum_response` BLOB
+- `qkd_key` BLOB (quantum key distribution)
+- `bell_state_verified` INTEGER
+- `created_at` REAL
+- `expires_at` REAL
+- `last_activity` REAL
+- `active` INTEGER
+
+**Indices:**
+- `idx_auth_uid` ON (uid)
+- `idx_auth_active` ON (active)
+
+---
+
+### security_audit_log
+**Purpose:** Security event audit trail  
+**Dependencies:** users  
+**Columns:**
+- `audit_id` INTEGER PRIMARY KEY
+- `event_type` TEXT (LOGIN, LOGOUT, AUTH_FAIL, PERMISSION_DENIED, etc.)
+- `event_status` TEXT (SUCCESS, FAILURE)
+- `event_description` TEXT
+- `uid` INTEGER → users.uid
+- `username` TEXT
+- `session_id` TEXT
+- `resource_type` TEXT (FILE, QUBIT, NETWORK, PROCESS)
+- `resource_id` TEXT
+- `source_ip` TEXT
+- `source_interface` TEXT
+- `severity` TEXT (DEBUG, INFO, WARNING, CRITICAL)
+- `timestamp` REAL
+
+**Indices:**
+- `idx_audit_event` ON (event_type)
+- `idx_audit_uid` ON (uid)
+- `idx_audit_time` ON (timestamp)
+- `idx_audit_severity` ON (severity)
+
+---
+
+## IPC MECHANISMS
+
+### ipc_pipes
+**Purpose:** Unix pipes for IPC  
+**Dependencies:** processes  
+**Columns:**
+- `pipe_id` INTEGER PRIMARY KEY
+- `pipe_type` TEXT (ANONYMOUS, NAMED)
+- `pipe_name` TEXT (for named pipes)
+- `reader_pid` INTEGER → processes.pid
+- `writer_pid` INTEGER → processes.pid
+- `buffer_size` INTEGER DEFAULT 65536
+- `current_buffer_usage` INTEGER
+- `state` TEXT (OPEN, CLOSED)
+- `bytes_written` INTEGER
+- `bytes_read` INTEGER
+- `created_at` REAL
+
+**Indices:**
+- `idx_pipe_reader` ON (reader_pid)
+- `idx_pipe_writer` ON (writer_pid)
+
+---
+
+### ipc_message_queues
+**Purpose:** POSIX message queues  
+**Dependencies:** processes  
+**Columns:**
+- `queue_id` INTEGER PRIMARY KEY
+- `queue_name` TEXT UNIQUE
+- `owner_pid` INTEGER → processes.pid
+- `max_messages` INTEGER DEFAULT 100
+- `max_message_size` INTEGER DEFAULT 8192
+- `current_message_count` INTEGER
+- `created_at` REAL
+
+---
+
+### ipc_messages
+**Purpose:** Message queue contents  
+**Dependencies:** ipc_message_queues, processes  
+**Columns:**
+- `message_id` INTEGER PRIMARY KEY
+- `queue_id` INTEGER → ipc_message_queues.queue_id
+- `message_type` INTEGER
+- `message_data` BLOB
+- `message_size` INTEGER
+- `priority` INTEGER
+- `sender_pid` INTEGER → processes.pid
+- `enqueued_at` REAL
+- `expires_at` REAL
+
+**Indices:**
+- `idx_msg_queue` ON (queue_id, priority DESC)
+
+---
+
+### ipc_shared_memory
+**Purpose:** Shared memory segments  
+**Dependencies:** processes  
+**Columns:**
+- `segment_id` INTEGER PRIMARY KEY
+- `segment_name` TEXT UNIQUE
+- `segment_size` INTEGER
+- `owner_pid` INTEGER → processes.pid
+- `permissions` INTEGER DEFAULT 0666
+- `segment_data` BLOB (persisted in DB)
+- `attached_pids` TEXT (JSON)
+- `marked_for_deletion` INTEGER
+- `created_at` REAL
+
+---
+
+### ipc_semaphores
+**Purpose:** POSIX semaphores  
+**Dependencies:** processes  
+**Columns:**
+- `semaphore_id` INTEGER PRIMARY KEY
+- `semaphore_name` TEXT UNIQUE
+- `current_value` INTEGER
+- `max_value` INTEGER
+- `owner_pid` INTEGER → processes.pid
+- `waiting_pids` TEXT (JSON)
+- `created_at` REAL
+
+---
+
+## SYSTEM MONITORING
+
+### system_metrics
+**Purpose:** Real-time system metrics  
+**Dependencies:** None  
+**Columns:**
+- `metric_id` INTEGER PRIMARY KEY
+- `metric_name` TEXT
+- `metric_category` TEXT (CPU, MEMORY, QUANTUM, NETWORK, FILESYSTEM)
+- `metric_value` REAL
+- `metric_unit` TEXT (percent, bytes, qubits, ms)
+- `component` TEXT
+- `timestamp` REAL
+- `window_start` REAL
+- `window_end` REAL
+
+**Indices:**
+- `idx_metric_name` ON (metric_name)
+- `idx_metric_category` ON (metric_category)
+- `idx_metric_time` ON (timestamp)
+
+---
+
+### system_health_checks
+**Purpose:** Periodic health monitoring  
+**Dependencies:** None  
+**Columns:**
+- `check_id` INTEGER PRIMARY KEY
+- `check_name` TEXT
+- `check_category` TEXT (QUANTUM, DATABASE, FILESYSTEM, NETWORK)
+- `status` TEXT (PASS, WARN, FAIL, UNKNOWN)
+- `status_message` TEXT
+- `measured_value` REAL
+- `threshold_warn` REAL
+- `threshold_fail` REAL
+- `check_duration_ms` REAL
+- `timestamp` REAL
+
+**Indices:**
+- `idx_health_status` ON (status)
+- `idx_health_time` ON (timestamp)
+
+---
+
+### system_error_log
+**Purpose:** System-wide error logging  
+**Dependencies:** processes  
+**Columns:**
+- `error_id` INTEGER PRIMARY KEY
+- `error_level` TEXT (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- `error_category` TEXT (QUANTUM, FILESYSTEM, NETWORK, PROCESS)
+- `error_code` TEXT
+- `error_message` TEXT
+- `error_context` TEXT (JSON)
+- `stack_trace` TEXT
+- `component` TEXT
+- `pid` INTEGER → processes.pid
+- `session_id` TEXT
+- `resolved` INTEGER
+- `resolution_notes` TEXT
+- `resolved_at` REAL
+- `timestamp` REAL
+
+**Indices:**
+- `idx_error_level` ON (error_level)
+- `idx_error_category` ON (error_category)
+- `idx_error_time` ON (timestamp)
+- `idx_error_resolved` ON (resolved)
+
+---
+
+### performance_profiles
+**Purpose:** Performance profiling data  
+**Dependencies:** None  
+**Columns:**
+- `profile_id` INTEGER PRIMARY KEY
+- `profile_name` TEXT
+- `profile_type` TEXT (COMMAND, CIRCUIT, ROUTE, SYSCALL)
+- `sample_count` INTEGER
+- `total_time_ms` REAL
+- `min_time_ms` REAL
+- `max_time_ms` REAL
+- `avg_time_ms` REAL
+- `stddev_time_ms` REAL
+- `quantum_operations` INTEGER
+- `avg_qubits_used` REAL
+- `avg_gates_applied` REAL
+- `avg_fidelity` REAL
+- `avg_memory_bytes` INTEGER
+- `peak_memory_bytes` INTEGER
+- `created_at` REAL
+- `last_updated` REAL
+
+**Indices:**
+- `idx_prof_name` ON (profile_name)
+- `idx_prof_type` ON (profile_type)
+
+---
+
+## HELP SYSTEM
+
+### man_pages
+**Purpose:** Manual page storage  
+**Dependencies:** None  
+**Columns:**
+- `page_id` INTEGER PRIMARY KEY
+- `cmd_name` TEXT
+- `section` INTEGER DEFAULT 1 (1=commands, 2=syscalls, 3=library)
+- `name_line` TEXT
+- `synopsis` TEXT
+- `description` TEXT
+- `options` TEXT
+- `examples` TEXT
+- `see_also` TEXT
+- `notes` TEXT
+- `bugs` TEXT
+- `author` TEXT
+- `quantum_requirements` TEXT
+- `quantum_algorithms` TEXT
+- `version` TEXT
+- `created_at` REAL
+- `last_updated` REAL
+
+**Indices:**
+- `idx_man_cmd` ON (cmd_name)
+- `idx_man_section` ON (section)
+
+---
+
+### command_examples
+**Purpose:** Command usage examples  
+**Dependencies:** None  
+**Columns:**
+- `example_id` INTEGER PRIMARY KEY
+- `cmd_name` TEXT
+- `example_command` TEXT
+- `example_description` TEXT
+- `example_output` TEXT (expected output)
+- `requires_setup` TEXT (prerequisites)
+- `difficulty_level` TEXT (BEGINNER, INTERMEDIATE, ADVANCED)
+- `tags` TEXT (JSON)
+- `validated` INTEGER
+- `validation_date` REAL
+- `created_at` REAL
+
+**Indices:**
+- `idx_example_cmd` ON (cmd_name)
+- `idx_example_difficulty` ON (difficulty_level)
+
+---
+
+### tutorials
+**Purpose:** Interactive learning tutorials  
+**Dependencies:** None  
+**Columns:**
+- `tutorial_id` INTEGER PRIMARY KEY
+- `tutorial_name` TEXT UNIQUE
+- `tutorial_category` TEXT (BASICS, QUANTUM, FILESYSTEM, NETWORKING)
+- `title` TEXT
+- `description` TEXT
+- `difficulty` TEXT DEFAULT 'BEGINNER'
+- `estimated_time_minutes` INTEGER
+- `steps` TEXT (JSON: step-by-step instructions)
+- `required_knowledge` TEXT (JSON)
+- `required_commands` TEXT (JSON)
+- `completion_count` INTEGER
+- `created_at` REAL
+- `last_updated` REAL
+
+**Indices:**
+- `idx_tutorial_category` ON (tutorial_category)
+- `idx_tutorial_difficulty` ON (difficulty)
+
+---
+
+## CONFIGURATION & STATE
+
+### system_config
+**Purpose:** System-wide configuration  
+**Dependencies:** None  
+**Columns:**
+- `config_key` TEXT PRIMARY KEY
+- `config_value` TEXT
+- `config_type` TEXT (STRING, INTEGER, FLOAT, BOOLEAN, JSON)
+- `description` TEXT
+- `category` TEXT (QUANTUM, FILESYSTEM, NETWORK, TERMINAL)
+- `allowed_values` TEXT (JSON: enumeration)
+- `min_value` REAL
+- `max_value` REAL
+- `requires_admin` INTEGER
+- `immutable` INTEGER
+- `default_value` TEXT
+- `updated_at` REAL
+- `updated_by` TEXT
+
+**Indices:**
+- `idx_config_category` ON (category)
+
+---
+
+### system_state
+**Purpose:** Runtime system state  
+**Dependencies:** None  
+**Columns:**
+- `state_key` TEXT PRIMARY KEY
+- `state_value` TEXT
+- `state_type` TEXT
+- `persistent` INTEGER (survives restart)
+- `updated_at` REAL
+
+---
+
+### boot_log
+**Purpose:** System boot sequence logging  
+**Dependencies:** None  
+**Columns:**
+- `boot_id` INTEGER PRIMARY KEY
+- `event_type` TEXT (START, INIT_LATTICE, INIT_EPR, MOUNT_FS, START_BUS)
+- `event_status` TEXT (PENDING, SUCCESS, FAILED)
+- `event_message` TEXT
+- `event_start` REAL
+- `event_end` REAL
+- `event_duration_ms` REAL
+- `boot_session_id` TEXT
+- `timestamp` REAL
+
+**Indices:**
+- `idx_boot_session` ON (boot_session_id)
+- `idx_boot_event` ON (event_type)
+
+---
+
+### maintenance_schedule
+**Purpose:** Automated maintenance tasks  
+**Dependencies:** None  
+**Columns:**
+- `schedule_id` INTEGER PRIMARY KEY
+- `task_name` TEXT UNIQUE
+- `task_type` TEXT (VACUUM, ANALYZE, CLEANUP, OPTIMIZE, HEARTBEAT)
+- `interval_seconds` REAL
+- `next_run` REAL
+- `last_run` REAL
+- `target_table` TEXT
+- `target_component` TEXT
+- `task_parameters` TEXT (JSON)
+- `enabled` INTEGER
+- `running` INTEGER
+- `run_count` INTEGER
+- `success_count` INTEGER
+- `failure_count` INTEGER
+- `avg_duration_ms` REAL
+- `last_error` TEXT
+- `created_at` REAL
+
+---
+
+### schema_metadata
+**Purpose:** Database schema versioning  
+**Dependencies:** None  
+**Columns:**
+- `metadata_key` TEXT PRIMARY KEY
+- `metadata_value` TEXT
+- `updated_at` REAL
+
+---
+
+## VIEWS
+
+### v_system_status
+**Purpose:** Real-time system overview  
+**Source Tables:** qubits, epr_pair_pool, processes, filesystem_inodes, network_connections, mega_bus_core, terminal_sessions  
+**Columns:**
+- `free_qubits` INTEGER
+- `allocated_qubits` INTEGER
+- `ready_epr_pairs` INTEGER
+- `running_processes` INTEGER
+- `total_files` INTEGER
+- `active_connections` INTEGER
+- `bus_active` INTEGER
+- `active_sessions` INTEGER
+
+---
+
+### v_command_stats
+**Purpose:** Command execution statistics  
+**Source Tables:** command_execution_log  
+**Columns:**
+- `cmd_name` TEXT
+- `execution_count` INTEGER
+- `success_count` INTEGER
+- `error_count` INTEGER
+- `avg_execution_time_ms` REAL
+- `avg_quantum_advantage` REAL
+- `max_execution_time_ms` REAL
+- `min_execution_time_ms` REAL
+
+---
+
+### v_qubit_health
+**Purpose:** Qubit health summary by entanglement type  
+**Source Tables:** qubits  
+**Columns:**
+- `entanglement_type` TEXT
+- `count` INTEGER
+- `avg_fidelity` REAL
+- `avg_error_rate` REAL
+- `total_gates` INTEGER
+- `total_measurements` INTEGER
+- `total_corrections` INTEGER
+
+---
+
+### v_epr_pool_status
+**Purpose:** EPR pool state summary  
+**Source Tables:** epr_pair_pool  
+**Columns:**
+- `state` TEXT
+- `pair_count` INTEGER
+- `avg_fidelity` REAL
+- `avg_chsh` REAL
+- `quantum_pairs` INTEGER
+
+---
+
+### v_network_summary
+**Purpose:** Network interface statistics  
+**Source Tables:** network_interfaces  
+**Columns:**
+- `interface_name` TEXT
+- `interface_type` TEXT
+- `state` TEXT
+- `packets_sent` INTEGER
+- `packets_received` INTEGER
+- `bytes_sent` INTEGER
+- `bytes_received` INTEGER
+- `send_error_rate` REAL
+
+---
+
+### v_filesystem_usage
+**Purpose:** Filesystem usage summary  
+**Source Tables:** filesystem_superblock, filesystem_inodes  
+**Columns:**
+- `total_blocks` INTEGER
+- `free_blocks` INTEGER
+- `total_inodes` INTEGER
+- `free_inodes` INTEGER
+- `file_count` INTEGER
+- `directory_count` INTEGER
+- `symlink_count` INTEGER
+
+---
+
+### v_active_routes
+**Purpose:** Active quantum routes  
+**Source Tables:** quantum_routing_table  
+**Columns:**
+- `route_id` INTEGER
+- `src_j_address` BLOB
+- `dst_j_address` BLOB
+- `strategy` TEXT
+- `path_length` INTEGER
+- `route_cost_sigma` REAL
+- `use_count` INTEGER
+- `last_used` REAL
+
+---
+
+### v_recent_errors
+**Purpose:** Last 24 hours of errors  
+**Source Tables:** system_error_log  
+**Columns:**
+- `error_level` TEXT
+- `error_category` TEXT
+- `error_message` TEXT
+- `component` TEXT
+- `timestamp` REAL
+- `resolved` INTEGER
+
+---
+
+### v_process_tree
+**Purpose:** Process hierarchy view  
+**Source Tables:** processes (self-join)  
+**Columns:**
+- `pid` INTEGER
+- `process_name` TEXT
+- `ppid` INTEGER
+- `state` TEXT
+- `num_qubits_allocated` INTEGER
+- `cpu_time_us` INTEGER
+- `memory_usage_bytes` INTEGER
+- `parent_name` TEXT
+
+---
+
+## TRIGGERS
+
+### tr_qubit_state_update
+**Purpose:** Auto-update qubit last_updated timestamp  
+**Fires:** AFTER UPDATE ON qubits  
+**Action:** SET last_updated = julianday('now')
+
+---
+
+### tr_command_use_increment
+**Purpose:** Increment command use counter  
+**Fires:** AFTER INSERT ON command_execution_log  
+**Action:** UPDATE command_registry SET use_count++, last_used=now()
+
+---
+
+### tr_epr_usage_update
+**Purpose:** Track EPR pair usage  
+**Fires:** AFTER UPDATE OF state ON epr_pair_pool WHEN NEW.state='ALLOCATED'  
+**Action:** UPDATE epr_pair_pool SET last_used=now(), use_count++
+
+---
+
+### tr_epr_auto_refresh
+**Purpose:** Auto-refresh low-fidelity EPR pairs  
+**Fires:** AFTER UPDATE OF fidelity ON epr_pair_pool WHEN fidelity < threshold  
+**Action:** UPDATE epr_pair_pool SET state='REFRESHING'
+
+---
+
+### tr_fs_superblock_file_count
+**Purpose:** Maintain filesystem inode counts  
+**Fires:** AFTER INSERT ON filesystem_inodes  
+**Action:** UPDATE filesystem_superblock increment file/dir/symlink counts
+
+---
+
+### tr_fs_superblock_file_delete
+**Purpose:** Maintain filesystem inode counts  
+**Fires:** AFTER DELETE ON filesystem_inodes  
+**Action:** UPDATE filesystem_superblock decrement file/dir/symlink counts
+
+---
+
+### tr_process_schedule_update
+**Purpose:** Track process scheduling  
+**Fires:** AFTER UPDATE OF state ON processes WHEN NEW.state='RUNNING'  
+**Action:** UPDATE processes SET last_scheduled=now()
+
+---
+
+### tr_auth_security_log
+**Purpose:** Log authentication events  
+**Fires:** AFTER INSERT ON auth_sessions  
+**Action:** INSERT INTO security_audit_log (LOGIN event)
+
+---
+
+### tr_terminal_activity_update
+**Purpose:** Track terminal activity  
+**Fires:** AFTER INSERT ON terminal_input  
+**Action:** UPDATE terminal_sessions SET last_activity=now(), commands_executed++
+
+---
+
+### tr_network_stats_update
+**Purpose:** Update network interface statistics  
+**Fires:** AFTER INSERT ON quantum_channel_packets  
+**Action:** UPDATE network_interfaces increment packet/byte counters
+
+---
+
+### tr_handler_stats_update
+**Purpose:** Update command handler statistics  
+**Fires:** AFTER INSERT ON command_execution_log  
+**Action:** UPDATE command_handlers increment execution_count, update avg_execution_ms
+
+---
+
+### tr_route_cache_invalidate
+**Purpose:** Invalidate failed routes  
+**Fires:** AFTER UPDATE OF lattice_path_used ON quantum_channel_packets WHEN state='FAILED'  
+**Action:** UPDATE quantum_routing_table SET cache_valid=0
+
+---
+
+## DEPENDENCY MAP
+
+### Layer 0 (No Dependencies)
+- `leech_lattice` - Foundation of all quantum operations
+- `entanglement_classes` - Shared entanglement definitions
+- `golay_generator_matrix` - Error correction foundation
+- `golay_codewords` - All G₂₄ codewords
+- `golay_syndrome_table` - Syndrome decoding
+- `golay_process_instances` - Parallel decoders
+- `filesystem_superblock` - Filesystem global state
+- `cpu_core_state` - CPU global state
+- `cpu_opcodes` - Instruction set
+- `microcode_primitives` - Atomic operations
+- `syscall_table` - Kernel interface
+- `command_registry` - Command catalog
+- `command_groups` - Command organization
+- `groups` - User groups
+- `capabilities` - POSIX capabilities
+- `system_config` - Configuration
+- `system_state` - Runtime state
+- `boot_log` - Boot sequence
+- `maintenance_schedule` - Maintenance tasks
+- `schema_metadata` - Schema versioning
+- `system_metrics` - Metrics (aggregation target)
+- `system_health_checks` - Health monitoring
+- `performance_profiles` - Profiling
+- `man_pages` - Documentation
+- `command_examples` - Examples
+- `tutorials` - Tutorials
+- `quantum_circuits` - Circuit library
+- `quantum_gate_library` - Gate definitions
+- `quantum_memory` - Quantum RAM
+- `quantum_queries` - Predefined queries
+- `quantum_gate_log` - Gate audit
+- `quantum_result_queue` - Result buffer
+
+---
+
+### Layer 1 (Depends on Layer 0)
+- `qubits` → leech_lattice, entanglement_classes
+- `golay_octads` → golay_codewords
+- `filesystem_inodes` → leech_lattice
+- `cpu_microcode_sequences` → cpu_opcodes
+- `command_flags` → command_registry
+- `command_arguments` → command_registry
+- `command_aliases` → command_registry
+- `command_group_membership` → command_registry, command_groups
+- `users` → filesystem_inodes
+- `network_interfaces` → leech_lattice
+- `quantum_routing_table` - (no hard FK)
+- `klein_bottle_manifolds` → leech_lattice
+- `mega_bus_core` → leech_lattice (soft references)
+- `circuit_compilation_cache` → quantum_circuits
+- `cpu_qubit_allocator` - (soft reference to qubits)
+
+---
+
+### Layer 2 (Depends on Layer 1)
+- `w_state_triangles` → qubits, entanglement_classes
+- `epr_pair_pool` → qubits
+- `filesystem_dentries` → filesystem_inodes
+- `filesystem_blocks` → filesystem_inodes
+- `filesystem_symlinks` → filesystem_inodes
+- `filesystem_cwd` → filesystem_inodes
+- `processes` → filesystem_inodes
+- `command_handlers` → command_registry, quantum_circuits
+- `command_execution_pipeline` → command_registry, command_handlers
+- `auth_sessions` → users
+- `vacuum_tunnels` → klein_bottle_manifolds
+- `network_connections` → network_interfaces, quantum_routing_table, processes
+
+---
+
+### Layer 3 (Depends on Layer 2)
+- `epr_heartbeat_schedule` → epr_pair_pool
+- `epr_heartbeat_log` → epr_pair_pool
+- `qubit_health_metrics` - (aggregates qubits)
+- `filesystem_external_mounts` → filesystem_inodes, vacuum_tunnels, klein_bottle_manifolds
+- `filesystem_open_files` → filesystem_inodes
+- `filesystem_inode_cache` → filesystem_inodes
+- `process_quantum_contexts` → processes
+- `process_scheduler_queue` → processes
+- `terminal_sessions` → processes, filesystem_inodes
+- `command_routing_cache` → quantum_routing_table
+- `cpu_execution_contexts` - (soft reference to processes)
+- `network_routing_table` → network_interfaces, quantum_routing_table
+
+---
+
+### Layer 4 (Depends on Layer 3)
+- `quantum_channel_packets` → quantum_routing_table
+- `terminal_input` → terminal_sessions
+- `terminal_output` → terminal_sessions
+- `ipc_pipes` → processes
+- `ipc_message_queues` → processes
+- `ipc_shared_memory` → processes
+- `ipc_semaphores` → processes
+- `system_error_log` → processes
+
+---
+
+### Layer 5 (Depends on Layer 4)
+- `packet_chunks` → quantum_channel_packets
+- `binary_transmission_log` → quantum_channel_packets
+- `command_execution_log` → command_registry, command_handlers, quantum_channel_packets, quantum_routing_table
+- `terminal_history` → terminal_sessions, command_execution_log
+- `ipc_messages` → ipc_message_queues, processes
+
+---
+
+### Layer 6 (Depends on Layer 5)
+- `quantum_measurement_results` → command_execution_log
+- `command_output_results` → command_execution_log
+- `security_audit_log` → users (from auth_sessions trigger)
+
+---
+
+## INITIALIZATION DATA
+
+### Root Filesystem
+- `filesystem_inodes` inode_id=1: Root directory
+- `filesystem_dentries`: . and .. entries for root
+
+### Default Bus
+- `mega_bus_core` bus_id=1: Quantum bus initialized
+
+### Root User
+- `users` uid=0: root user
+- `groups` gid=0: root group
+
+### Loopback Interface
+- `network_interfaces`: lo interface (127.0.0.1)
+
+### Default Config
+- `system_config`: hostname, timezone, quantum limits, filesystem limits, network timeouts, security settings
+
+### Maintenance Tasks
+- `maintenance_schedule`: EPR heartbeat, cleanup tasks, health checks, defrag, metrics aggregation
+
+---
+
+## STORAGE ESTIMATES
+
+**Total Tables:** 120+  
+**Total Views:** 12  
+**Total Triggers:** 15+  
+**Total Indices:** 150+  
+
+**Estimated DB Size:**
+- Empty schema: ~5 MB
+- With 196,560 lattice points: ~50 MB
+- With 196,560 qubits: ~80 MB
+- With 98,280 EPR pairs: ~100 MB
+- With filesystem (1M inodes): ~150 MB
+- With full command history (1M): ~200 MB
+- **Production estimate:** 200-300 MB
+
+---
+
+## CRITICAL PATHS
+
+### Command Execution Flow
+1. `terminal_input` receives command
+2. `command_registry` lookup
+3. `command_handlers` execution
+4. `quantum_circuits` or `cpu_opcodes` invocation
+5. `qubits` allocation via `cpu_qubit_allocator`
+6. `epr_pair_pool` allocation if needed
+7. `quantum_routing_table` route selection
+8. `quantum_channel_packets` transmission
+9. `command_execution_log` logging
+10. `quantum_measurement_results` storage
+11. `terminal_output` display
+
+### Quantum Gate Application
+1. `qubits` state read
+2. `quantum_gate_library` gate lookup
+3. `cpu_opcodes` → `cpu_microcode_sequences` → `microcode_primitives`
+4. `qubits` state update
+5. `quantum_gate_log` audit
+6. `golay_syndrome_table` error detection
+7. `qubit_health_metrics` aggregation
+
+### File Access
+1. `filesystem_cwd` get current directory
+2. `filesystem_dentries` name resolution
+3. `filesystem_inodes` inode lookup
+4. `filesystem_inode_cache` check
+5. `filesystem_blocks` data read
+6. `golay_syndrome_table` error correction
+7. `filesystem_open_files` FD tracking
+8. `filesystem_external_mounts` if cross-boundary
+
+### Network Communication
+1. `network_interfaces` interface select
+2. `network_routing_table` route lookup
+3. `quantum_routing_table` quantum path
+4. `epr_pair_pool` allocation
+5. `quantum_channel_packets` transmission
+6. `network_connections` socket tracking
+7. `binary_transmission_log` audit
+
+---
+
+## OPTIMIZATION NOTES
+
+### Hot Tables (High Write)
+- `qubits` - Every gate operation
+- `command_execution_log` - Every command
+- `terminal_input/output` - Every keystroke
+- `quantum_channel_packets` - Every transmission
+- `system_metrics` - Continuous monitoring
+
+**Optimization:** WAL mode, write-ahead caching, batch commits
+
+### Hot Tables (High Read)
+- `command_registry` - Every command lookup
+- `quantum_routing_table` - Every packet route
+- `filesystem_inodes` - Every file access
+- `cpu_opcodes` - Every instruction
+- `epr_pair_pool` - Continuous allocation
+
+**Optimization:** Read caching, covering indices, materialized views
+
+### Large Tables
+- `qubits` - 196,560 rows
+- `leech_lattice` - 196,560 rows
+- `epr_pair_pool` - 98,280+ rows
+- `filesystem_inodes` - 1M+ rows (target)
+- `command_execution_log` - Grows unbounded
+
+**Optimization:** Partitioning, archival, compression
+
+---
+
+## CONSISTENCY RULES
+
+### Foreign Key Cascade Policies
+- ON DELETE CASCADE: Child data removed automatically
+  - `packet_chunks` → `quantum_channel_packets`
+  - `epr_heartbeat_schedule` → `epr_pair_pool`
+  - `filesystem_dentries` → `filesystem_inodes`
+  
+- ON DELETE SET NULL: Orphaned records kept
+  - (None currently implemented)
+
+- ON DELETE RESTRICT: Deletion prevented
+  - Most FK relationships default to this
+
+### Referential Integrity
+- **Soft references** (no FK constraint) used where:
+  - Cross-subsystem boundaries (command → quantum → filesystem)
+  - Historical data (logs referencing deleted objects)
+  - Optional relationships
+
+- **Hard FKs** used where:
+  - Parent-child relationships (inode → blocks)
+  - Ownership (process → quantum context)
+  - Critical dependencies (qubit → lattice point)
+
+---
+
+**END OF SCHEMA v16 DOCUMENTATION**
